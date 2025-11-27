@@ -53,6 +53,12 @@ public class General {
     @Config.RangeInt(min = 1, max = 10000)
     public static int maxNameLengthPixel;
 
+    @Config.LangKey("option.wdmla.general.mobhudrange")
+    @Config.DefaultInt(32)
+    @Config.RangeInt(min = 1, max = 256)
+    @Config.Comment("Maximum distance in blocks at which entities can show WDMla HUD. Only affects entities, not blocks.")
+    public static int mobHudRange;
+
     @Config.LangKey("option.wdmla.general.align.icon.right.top")
     @Config.DefaultBoolean(true)
     @Config.Comment("Always put harvest / interaction icons at the right top corner of default block info")
