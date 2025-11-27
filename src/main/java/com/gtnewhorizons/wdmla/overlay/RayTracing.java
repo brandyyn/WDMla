@@ -6,6 +6,8 @@ import java.util.List;
 
 import net.minecraft.util.AxisAlignedBB;
 
+import net.minecraft.util.MathHelper;
+
 import com.gtnewhorizons.wdmla.config.General;
 
 
@@ -45,6 +47,7 @@ public class RayTracing {
     private MovingObjectPosition target = null;
     private final Minecraft mc = Minecraft.getMinecraft();
 
+
     public void fire() {
         EntityLivingBase viewpoint = mc.renderViewEntity;
 
@@ -53,7 +56,7 @@ public class RayTracing {
             return;
         }
 
-        // Block reach distance remains vanilla so blocks are not affected
+        // Block reach distance remains vanilla for blocks
         final double blockReach = mc.playerController.getBlockReachDistance();
 
         // Configurable range for entities (mobs). If misconfigured, fall back to block reach.
@@ -64,16 +67,40 @@ public class RayTracing {
             entityReach = blockReach;
         }
 
-        // Try to find an entity (mob) first, using the extended reach
+        // Perform both block and entity ray traces, then decide what to show
+        MovingObjectPosition blockTarget = this.rayTrace(viewpoint, blockReach, 0.0F);
         MovingObjectPosition entityTarget = rayTraceEntities(viewpoint, entityReach, 0.0F);
 
-        if (entityTarget != null && entityTarget.entityHit != null && !shouldHidePlayer(entityTarget.entityHit)) {
-            this.target = entityTarget;
+        // Filter out invisible players if configured so
+        if (entityTarget != null && entityTarget.entityHit != null && shouldHidePlayer(entityTarget.entityHit)) {
+            entityTarget = null;
+        }
+
+        World world = viewpoint.worldObj;
+
+        // Decide priority:
+        // 1. If we have a visible entity and either no block or only transparent blocks in front, prefer the entity.
+        // 2. Otherwise, prefer the solid block (if any).
+        if (entityTarget != null) {
+            if (blockTarget == null || blockTarget.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK) {
+                this.target = entityTarget;
+                return;
+            }
+
+            Block block = world.getBlock(blockTarget.blockX, blockTarget.blockY, blockTarget.blockZ);
+            if (isHudTransparentBlock(block, world, blockTarget.blockX, blockTarget.blockY, blockTarget.blockZ)) {
+                // Looking at a mob through transparent blocks (e.g., glass) – prefer the mob
+                this.target = entityTarget;
+                return;
+            }
+
+            // Solid block in the way – prioritise block display
+            this.target = blockTarget;
             return;
         }
 
-        // Fallback to vanilla-style block ray trace using normal reach distance
-        this.target = this.rayTrace(viewpoint, blockReach, 0.0F);
+        // No entity hit; fall back to whatever block (if any) we have
+        this.target = blockTarget;
     }
 
     private static boolean shouldHidePlayer(Entity targetEnt) {
@@ -139,6 +166,25 @@ public class RayTracing {
             float border = candidate.getCollisionBorderSize();
             AxisAlignedBB aabb = candidate.boundingBox.expand(border, border, border);
             MovingObjectPosition intercept = aabb.calculateIntercept(eyePos, reachVec);
+
+            // If there's any *solid* block between us and this entity along the look vector,
+            // consider the entity occluded and skip it. Transparent blocks (glass, liquids, etc.)
+            // are ignored so mobs can still be targeted through them.
+            if (intercept != null) {
+                MovingObjectPosition blockHit;
+                if (ConfigHandler.instance().getConfig(Configuration.CATEGORY_GENERAL, Constants.CFG_WAILA_LIQUID, true)) {
+                    blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, true);
+                } else {
+                    blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, false);
+                }
+
+                if (blockHit != null) {
+                    Block hitBlock = world.getBlock(blockHit.blockX, blockHit.blockY, blockHit.blockZ);
+                    if (!isHudTransparentBlock(hitBlock, world, blockHit.blockX, blockHit.blockY, blockHit.blockZ)) {
+                        continue;
+                    }
+                }
+            }
 
             if (aabb.isVecInside(eyePos)) {
                 if (0.0D < closestDistance) {
@@ -233,5 +279,35 @@ public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float
 
         return items;
     }
+
+    /**
+     * Determines whether a block should be treated as transparent for HUD raytracing purposes.
+     * This allows entities to be targeted through glass, liquids, leaves, etc., while still
+     * blocking entities that are actually behind solid walls.
+     */
+    private boolean isHudTransparentBlock(Block block, World world, int x, int y, int z) {
+        if (block == null) {
+            return false;
+        }
+
+        try {
+            if (block.getMaterial() != null && block.getMaterial().isLiquid()) {
+                return true;
+            }
+
+            // Non-opaque blocks (glass, panes, leaves, fences, etc.) are considered see-through
+            if (!block.isOpaqueCube()) {
+                return true;
+            }
+
+            // As a fallback, treat blocks that let a lot of light through as transparent
+            if (block.getLightOpacity(world, x, y, z) < 255) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+
+        return false;
+    }
+
 
 }
