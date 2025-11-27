@@ -54,7 +54,7 @@ public class General {
     public static int maxNameLengthPixel;
 
     @Config.LangKey("option.wdmla.general.mobhudrange")
-    @Config.DefaultInt(32)
+    @Config.DefaultInt(64)
     @Config.RangeInt(min = 1, max = 256)
     @Config.Comment("Maximum distance in blocks at which entities can show WDMla HUD. Only affects entities, not blocks.")
     public static int mobHudRange;
