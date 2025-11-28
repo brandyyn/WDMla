@@ -1,15 +1,12 @@
 package com.gtnewhorizons.wdmla.overlay;
 
 import java.util.ArrayList;
-
 import java.util.List;
 
 import net.minecraft.util.AxisAlignedBB;
-
 import net.minecraft.util.MathHelper;
 
 import com.gtnewhorizons.wdmla.config.General;
-
 
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
@@ -47,7 +44,6 @@ public class RayTracing {
     private MovingObjectPosition target = null;
     private final Minecraft mc = Minecraft.getMinecraft();
 
-
     public void fire() {
         EntityLivingBase viewpoint = mc.renderViewEntity;
 
@@ -78,24 +74,64 @@ public class RayTracing {
 
         World world = viewpoint.worldObj;
 
-        // Decide priority:
-        // 1. If we have a visible entity and either no block or only transparent blocks in front, prefer the entity.
-        // 2. Otherwise, prefer the solid block (if any).
+        // Decide priority using distance along the ray:
+        // - If there is an entity hit and no solid block in front of it, prefer the closest hit.
+        // - Transparent blocks (glass, liquids, etc.) never override an entity.
         if (entityTarget != null) {
+            // No block at all -> entity wins
             if (blockTarget == null || blockTarget.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK) {
                 this.target = entityTarget;
                 return;
             }
 
+            // We have both an entity and a block along the ray
             Block block = world.getBlock(blockTarget.blockX, blockTarget.blockY, blockTarget.blockZ);
+
+            // If the block is HUD-transparent (glass, liquids, leaves...), always prefer the entity
             if (isHudTransparentBlock(block, world, blockTarget.blockX, blockTarget.blockY, blockTarget.blockZ)) {
-                // Looking at a mob through transparent blocks (e.g., glass) – prefer the mob
                 this.target = entityTarget;
                 return;
             }
 
-            // Solid block in the way – prioritise block display
-            this.target = blockTarget;
+            // For solid blocks, choose whichever is closer along the view ray.
+            // Entity distance
+            double entityDistSq;
+            if (entityTarget.hitVec != null) {
+                entityDistSq = viewpoint.getDistanceSq(
+                        entityTarget.hitVec.xCoord,
+                        entityTarget.hitVec.yCoord,
+                        entityTarget.hitVec.zCoord
+                );
+            } else if (entityTarget.entityHit != null) {
+                entityDistSq = viewpoint.getDistanceSqToEntity(entityTarget.entityHit);
+            } else {
+                entityDistSq = Double.MAX_VALUE;
+            }
+
+            // Block distance
+            double blockDistSq;
+            if (blockTarget.hitVec != null) {
+                blockDistSq = viewpoint.getDistanceSq(
+                        blockTarget.hitVec.xCoord,
+                        blockTarget.hitVec.yCoord,
+                        blockTarget.hitVec.zCoord
+                );
+            } else {
+                // Fallback: center of the block
+                double cx = blockTarget.blockX + 0.5D;
+                double cy = blockTarget.blockY + 0.5D;
+                double cz = blockTarget.blockZ + 0.5D;
+                blockDistSq = viewpoint.getDistanceSq(cx, cy, cz);
+            }
+
+            // Small epsilon to avoid weird float equality issues
+            if (entityDistSq <= blockDistSq + 1.0E-4D) {
+                // Entity is in front of the block -> show entity
+                this.target = entityTarget;
+            } else {
+                // Block is closer -> show block
+                this.target = blockTarget;
+            }
             return;
         }
 
@@ -125,7 +161,6 @@ public class RayTracing {
                 : null;
     }
 
-    
     private MovingObjectPosition rayTraceEntities(EntityLivingBase viewer, double maxDistance, float partialTicks) {
         if (viewer == null || viewer.worldObj == null) {
             return null;
@@ -172,7 +207,11 @@ public class RayTracing {
             // are ignored so mobs can still be targeted through them.
             if (intercept != null) {
                 MovingObjectPosition blockHit;
-                if (ConfigHandler.instance().getConfig(Configuration.CATEGORY_GENERAL, Constants.CFG_WAILA_LIQUID, true)) {
+                if (ConfigHandler.instance().getConfig(
+                        Configuration.CATEGORY_GENERAL,
+                        Constants.CFG_WAILA_LIQUID,
+                        true
+                )) {
                     blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, true);
                 } else {
                     blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, false);
@@ -212,7 +251,7 @@ public class RayTracing {
         return null;
     }
 
-public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float par3) {
+    public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float par3) {
         Vec3 vec3 = entity.getPosition(par3);
         Vec3 vec31 = entity.getLook(par3);
         Vec3 vec32 = vec3.addVector(vec31.xCoord * par1, vec31.yCoord * par1, vec31.zCoord * par1);
@@ -308,6 +347,4 @@ public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float
 
         return false;
     }
-
-
 }
