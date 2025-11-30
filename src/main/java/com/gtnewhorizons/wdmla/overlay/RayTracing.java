@@ -41,19 +41,30 @@ public class RayTracing {
         return _instance;
     }
 
-    private MovingObjectPosition target = null;
-    private final Minecraft mc = Minecraft.getMinecraft();
+    private MovingObjectPosition target;
+    private Minecraft mc = Minecraft.getMinecraft();
+
+    public MovingObjectPosition getTarget() {
+        return this.target;
+    }
+
+    public Entity getTargetEntity() {
+        return this.target != null ? this.target.entityHit : null;
+    }
+
+    public ItemStack getTargetStack() {
+        return getIdentifierStack();
+    }
 
     public void fire() {
-        EntityLivingBase viewpoint = mc.renderViewEntity;
-
-        if (viewpoint == null) {
-            this.target = null;
+        if (mc.theWorld == null || mc.thePlayer == null) {
+            target = null;
             return;
         }
 
         // Block reach distance remains vanilla for blocks
-        final double blockReach = mc.playerController.getBlockReachDistance();
+        EntityLivingBase viewpoint = mc.renderViewEntity;
+        double blockReach = mc.playerController.getBlockReachDistance();
 
         // Configurable range for entities (mobs). If misconfigured, fall back to block reach.
         int cfgRange = General.mobHudRange;
@@ -75,10 +86,11 @@ public class RayTracing {
         World world = viewpoint.worldObj;
 
         // Decide priority using distance along the ray:
-        // - If there is an entity hit and no solid block in front of it, prefer the closest hit.
-        // - Transparent blocks (glass, liquids, etc.) never override an entity.
-        if (entityTarget != null) {
-            // No block at all -> entity wins
+        // - If there is an entity hit and no solid block hit, show the entity.
+        // - If there is a block hit and no entity, show the block.
+        // - If both exist, compare distances along the view ray, with special handling for HUD-transparent blocks
+        //   (glass, liquids, leaves, etc.)
+        if (entityTarget != null && entityTarget.typeOfHit == MovingObjectPosition.MovingObjectType.ENTITY) {
             if (blockTarget == null || blockTarget.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK) {
                 this.target = entityTarget;
                 return;
@@ -141,27 +153,27 @@ public class RayTracing {
 
     private static boolean shouldHidePlayer(Entity targetEnt) {
         // Check if entity is player with invisibility effect
-        if (targetEnt instanceof EntityPlayer thePlayer) {
+        if (targetEnt instanceof EntityPlayer) {
+            EntityPlayer thePlayer = (EntityPlayer) targetEnt;
             boolean shouldHidePlayerSetting = !ConfigHandler.instance().getConfig("vanilla.show_invisible_players");
             return shouldHidePlayerSetting && thePlayer.isInvisible();
         }
         return false;
     }
 
-    public MovingObjectPosition getTarget() {
-        return this.target;
+    public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float par3) {
+        Vec3 vec3 = entity.getPosition(par3);
+        Vec3 vec31 = entity.getLook(par3);
+        Vec3 vec32 = vec3.addVector(vec31.xCoord * par1, vec31.yCoord * par1, vec31.zCoord * par1);
+
+        if (ConfigHandler.instance().getConfig(Configuration.CATEGORY_GENERAL, Constants.CFG_WAILA_LIQUID, true)) {
+            return entity.worldObj.rayTraceBlocks(vec3, vec32, true);
+        } else {
+            return entity.worldObj.rayTraceBlocks(vec3, vec32);
+        }
     }
 
-    public ItemStack getTargetStack() {
-        return this.target.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK ? this.getIdentifierStack() : null;
-    }
-
-    public Entity getTargetEntity() {
-        return this.target.typeOfHit == MovingObjectPosition.MovingObjectType.ENTITY ? this.getIdentifierEntity()
-                : null;
-    }
-
-    private MovingObjectPosition rayTraceEntities(EntityLivingBase viewer, double maxDistance, float partialTicks) {
+    MovingObjectPosition rayTraceEntities(EntityLivingBase viewer, double maxDistance, float partialTicks) {
         if (viewer == null || viewer.worldObj == null) {
             return null;
         }
@@ -180,8 +192,7 @@ public class RayTracing {
         Vec3 hitVec = null;
         double closestDistance = maxDistance;
 
-        @SuppressWarnings("unchecked")
-        java.util.List<Entity> entities = world.getEntitiesWithinAABBExcludingEntity(
+        List<Entity> entities = world.getEntitiesWithinAABBExcludingEntity(
                 viewer,
                 viewer.boundingBox.addCoord(
                         lookVec.xCoord * maxDistance,
@@ -205,24 +216,8 @@ public class RayTracing {
             // If there's any *solid* block between us and this entity along the look vector,
             // consider the entity occluded and skip it. Transparent blocks (glass, liquids, etc.)
             // are ignored so mobs can still be targeted through them.
-            if (intercept != null) {
-                MovingObjectPosition blockHit;
-                if (ConfigHandler.instance().getConfig(
-                        Configuration.CATEGORY_GENERAL,
-                        Constants.CFG_WAILA_LIQUID,
-                        true
-                )) {
-                    blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, true);
-                } else {
-                    blockHit = world.rayTraceBlocks(eyePos, intercept.hitVec, false);
-                }
-
-                if (blockHit != null) {
-                    Block hitBlock = world.getBlock(blockHit.blockX, blockHit.blockY, blockHit.blockZ);
-                    if (!isHudTransparentBlock(hitBlock, world, blockHit.blockX, blockHit.blockY, blockHit.blockZ)) {
-                        continue;
-                    }
-                }
+            if (intercept != null && isPathBlockedBySolid(world, eyePos, intercept.hitVec)) {
+                continue;
             }
 
             if (aabb.isVecInside(eyePos)) {
@@ -251,14 +246,65 @@ public class RayTracing {
         return null;
     }
 
-    public MovingObjectPosition rayTrace(EntityLivingBase entity, double par1, float par3) {
-        Vec3 vec3 = entity.getPosition(par3);
-        Vec3 vec31 = entity.getLook(par3);
-        Vec3 vec32 = vec3.addVector(vec31.xCoord * par1, vec31.yCoord * par1, vec31.zCoord * par1);
+    public MovingObjectPosition getMouseOver() {
+        return target;
+    }
 
-        if (ConfigHandler.instance().getConfig(Configuration.CATEGORY_GENERAL, Constants.CFG_WAILA_LIQUID, true))
-            return entity.worldObj.rayTraceBlocks(vec3, vec32, true);
-        else return entity.worldObj.rayTraceBlocks(vec3, vec32, false);
+    public ArrayList<ItemStack> getIdentifierItems() {
+        ArrayList<ItemStack> items = new ArrayList<ItemStack>();
+        MovingObjectPosition position = this.target;
+
+        if (position == null) return items;
+
+        if (position.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
+            int x = position.blockX;
+            int y = position.blockY;
+            int z = position.blockZ;
+            World world = mc.theWorld;
+            Block mouseoverBlock = world.getBlock(x, y, z);
+
+            if (mouseoverBlock == null || mouseoverBlock.isAir(world, x, y, z)) return items;
+
+            if (mouseoverBlock instanceof IShearable) {
+                items.addAll(
+                        ((IShearable) mouseoverBlock)
+                                .onSheared(new ItemStack(Items.shears), world, x, y, z, 0));
+            }
+
+            if (items.isEmpty()) items.add(0, new ItemStack(mouseoverBlock, 1, world.getBlockMetadata(x, y, z)));
+
+            return items;
+        }
+
+        if (position.typeOfHit == MovingObjectPosition.MovingObjectType.ENTITY
+                && position.entityHit instanceof EntityLivingBase) {
+            EntityLivingBase entity = (EntityLivingBase) position.entityHit;
+            ArrayList<ItemStack> tmp = new ArrayList<ItemStack>();
+
+            tmp.add(entity.getHeldItem());
+            for (int i = 0; i < 4; i++) {
+                tmp.add(entity.getEquipmentInSlot(i));
+            }
+            for (ItemStack stack : tmp) {
+                if (stack != null) items.add(stack);
+            }
+
+            TileEntity te = entity.worldObj.getTileEntity(
+                    MathHelper.floor_double(entity.posX),
+                    MathHelper.floor_double(entity.posY),
+                    MathHelper.floor_double(entity.posZ));
+            if (te != null) {
+                try {
+                    ItemStack pick = te.getBlockType().getPickBlock(
+                            RayTracing.instance().getTarget(), te.getWorldObj(), te.xCoord, te.yCoord, te.zCoord);
+                    if (pick != null) {
+                        items.add(pick);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        return items;
     }
 
     public ItemStack getIdentifierStack() {
@@ -272,51 +318,57 @@ public class RayTracing {
     }
 
     public Entity getIdentifierEntity() {
-        return this.target.entityHit;
+        return this.target != null ? this.target.entityHit : null;
     }
 
-    public ArrayList<ItemStack> getIdentifierItems() {
-        ArrayList<ItemStack> items = new ArrayList<>();
 
-        if (this.target == null) return items;
-
-        World world = mc.theWorld;
-
-        int x = this.target.blockX;
-        int y = this.target.blockY;
-        int z = this.target.blockZ;
-
-        Block mouseoverBlock = world.getBlock(x, y, z);
-        TileEntity tileEntity = world.getTileEntity(x, y, z);
-        if (mouseoverBlock == null) return items;
-
-        if (tileEntity == null) {
-            try {
-                ItemStack block = new ItemStack(mouseoverBlock, 1, world.getBlockMetadata(x, y, z));
-
-                if (block.getItem() != null) items.add(block);
-
-            } catch (Exception ignored) {}
+    private boolean isPathBlockedBySolid(World world, Vec3 start, Vec3 end) {
+        if (world == null || start == null || end == null) {
+            return false;
         }
 
-        if (!items.isEmpty()) return items;
+        Vec3 currentStart = start;
 
-        try {
-            ItemStack pick = mouseoverBlock.getPickBlock(this.target, world, x, y, z);
-            if (pick != null) items.add(pick);
-        } catch (Exception ignored) {}
+        boolean stopOnLiquid = ConfigHandler.instance().getConfig(
+                Configuration.CATEGORY_GENERAL,
+                Constants.CFG_WAILA_LIQUID,
+                true
+        );
 
-        if (!items.isEmpty()) return items;
+        for (int i = 0; i < 8; i++) {
+            MovingObjectPosition blockHit = world.rayTraceBlocks(currentStart, end, stopOnLiquid);
 
-        if (mouseoverBlock instanceof IShearable shearable) {
-            if (shearable.isShearable(new ItemStack(Items.shears), world, x, y, z)) {
-                items.addAll(shearable.onSheared(new ItemStack(Items.shears), world, x, y, z, 0));
+            if (blockHit == null || blockHit.hitVec == null) {
+                return false;
             }
+
+            Block hitBlock = world.getBlock(blockHit.blockX, blockHit.blockY, blockHit.blockZ);
+            if (!isHudTransparentBlock(hitBlock, world, blockHit.blockX, blockHit.blockY, blockHit.blockZ)) {
+                return true;
+            }
+
+            double remainingSq = blockHit.hitVec.squareDistanceTo(end);
+            if (remainingSq < 1.0E-4D) {
+                return false;
+            }
+
+            double dirX = end.xCoord - blockHit.hitVec.xCoord;
+            double dirY = end.yCoord - blockHit.hitVec.yCoord;
+            double dirZ = end.zCoord - blockHit.hitVec.zCoord;
+            double length = MathHelper.sqrt_double(dirX * dirX + dirY * dirY + dirZ * dirZ);
+            if (length < 1.0E-6D) {
+                return false;
+            }
+
+            dirX /= length;
+            dirY /= length;
+            dirZ /= length;
+
+            currentStart = blockHit.hitVec.addVector(dirX * 1.0E-3D, dirY * 1.0E-3D, dirZ * 1.0E-3D);
         }
 
-        if (items.isEmpty()) items.add(0, new ItemStack(mouseoverBlock, 1, world.getBlockMetadata(x, y, z)));
-
-        return items;
+        // If we somehow hit ~6 transparent blocks in a row, just bail out and say blocked rather than spam more ray traces.
+        return true;
     }
 
     /**
@@ -339,10 +391,6 @@ public class RayTracing {
                 return true;
             }
 
-            // As a fallback, treat blocks that let a lot of light through as transparent
-            if (block.getLightOpacity(world, x, y, z) < 255) {
-                return true;
-            }
         } catch (Throwable ignored) {}
 
         return false;
