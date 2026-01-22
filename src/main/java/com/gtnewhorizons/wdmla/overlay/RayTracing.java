@@ -101,7 +101,23 @@ public class RayTracing {
 
             // If the block is HUD-transparent (glass, liquids, leaves...), always prefer the entity
             if (isHudTransparentBlock(block, world, blockTarget.blockX, blockTarget.blockY, blockTarget.blockZ)) {
-                this.target = entityTarget;
+                Vec3 eyePos = viewpoint.getPosition(0.0F);
+                Vec3 entityHit = entityTarget.hitVec;
+
+                if (entityHit == null && entityTarget.entityHit != null) {
+                    Entity e = entityTarget.entityHit;
+                    entityHit = Vec3.createVectorHelper(
+                            e.posX,
+                            e.posY + (double) (e.height * 0.5F),
+                            e.posZ
+                    );
+                }
+
+                if (entityHit != null && isPathBlockedBySolid(world, eyePos, entityHit)) {
+                    this.target = blockTarget;
+                } else {
+                    this.target = entityTarget;
+                }
                 return;
             }
 
@@ -138,10 +154,8 @@ public class RayTracing {
 
             // Small epsilon to avoid weird float equality issues
             if (entityDistSq <= blockDistSq + 1.0E-4D) {
-                // Entity is in front of the block -> show entity
                 this.target = entityTarget;
             } else {
-                // Block is closer -> show block
                 this.target = blockTarget;
             }
             return;
@@ -321,7 +335,11 @@ public class RayTracing {
         return this.target != null ? this.target.entityHit : null;
     }
 
-
+    /**
+     * Returns true if there is ANY non-transparent (solid) blocker between start and end.
+     * Handles ANY number of transparent blocks correctly, including the case where a solid
+     * block is directly touching a transparent one (glass -> stone).
+     */
     private boolean isPathBlockedBySolid(World world, Vec3 start, Vec3 end) {
         if (world == null || start == null || end == null) {
             return false;
@@ -335,26 +353,24 @@ public class RayTracing {
                 true
         );
 
-        for (int i = 0; i < 8; i++) {
-            MovingObjectPosition blockHit = world.rayTraceBlocks(currentStart, end, stopOnLiquid);
+        for (int i = 0; i < 64; i++) {
+            MovingObjectPosition hit = world.rayTraceBlocks(currentStart, end, stopOnLiquid);
 
-            if (blockHit == null || blockHit.hitVec == null) {
+            if (hit == null || hit.hitVec == null) {
                 return false;
             }
 
-            Block hitBlock = world.getBlock(blockHit.blockX, blockHit.blockY, blockHit.blockZ);
-            if (!isHudTransparentBlock(hitBlock, world, blockHit.blockX, blockHit.blockY, blockHit.blockZ)) {
+            Block hitBlock = world.getBlock(hit.blockX, hit.blockY, hit.blockZ);
+
+            // First non-transparent block = blocked
+            if (!isHudTransparentBlock(hitBlock, world, hit.blockX, hit.blockY, hit.blockZ)) {
                 return true;
             }
 
-            double remainingSq = blockHit.hitVec.squareDistanceTo(end);
-            if (remainingSq < 1.0E-4D) {
-                return false;
-            }
-
-            double dirX = end.xCoord - blockHit.hitVec.xCoord;
-            double dirY = end.yCoord - blockHit.hitVec.yCoord;
-            double dirZ = end.zCoord - blockHit.hitVec.zCoord;
+            // Step a tiny amount forward along the ray
+            double dirX = end.xCoord - hit.hitVec.xCoord;
+            double dirY = end.yCoord - hit.hitVec.yCoord;
+            double dirZ = end.zCoord - hit.hitVec.zCoord;
             double length = MathHelper.sqrt_double(dirX * dirX + dirY * dirY + dirZ * dirZ);
             if (length < 1.0E-6D) {
                 return false;
@@ -364,10 +380,23 @@ public class RayTracing {
             dirY /= length;
             dirZ /= length;
 
-            currentStart = blockHit.hitVec.addVector(dirX * 1.0E-3D, dirY * 1.0E-3D, dirZ * 1.0E-3D);
+            currentStart = hit.hitVec.addVector(dirX * 1.0E-4D, dirY * 1.0E-4D, dirZ * 1.0E-4D);
+
+            int cx = MathHelper.floor_double(currentStart.xCoord);
+            int cy = MathHelper.floor_double(currentStart.yCoord);
+            int cz = MathHelper.floor_double(currentStart.zCoord);
+
+            Block inside = world.getBlock(cx, cy, cz);
+            if (inside != null && !inside.isAir(world, cx, cy, cz)
+                    && !isHudTransparentBlock(inside, world, cx, cy, cz)) {
+                return true;
+            }
+
+            if (currentStart.squareDistanceTo(end) < 1.0E-8D) {
+                return false;
+            }
         }
 
-        // If we somehow hit ~6 transparent blocks in a row, just bail out and say blocked rather than spam more ray traces.
         return true;
     }
 
@@ -377,17 +406,35 @@ public class RayTracing {
      * blocking entities that are actually behind solid walls.
      */
     private boolean isHudTransparentBlock(Block block, World world, int x, int y, int z) {
-        if (block == null) {
-            return false;
-        }
+        if (block == null) return false;
 
         try {
             if (block.getMaterial() != null && block.getMaterial().isLiquid()) {
                 return true;
             }
 
-            // Non-opaque blocks (glass, panes, leaves, fences, etc.) are considered see-through
-            if (!block.isOpaqueCube()) {
+            if (block instanceof net.minecraft.block.BlockTorch
+                    || block instanceof net.minecraft.block.BlockRedstoneTorch) {
+                return false;
+            }
+
+            if (block instanceof net.minecraft.block.BlockLeaves) {
+                return true;
+            }
+
+            int pass = 0;
+            try {
+                pass = block.getRenderBlockPass();
+            } catch (Throwable ignored) {}
+            if (pass == 1) {
+                return true;
+            }
+
+            AxisAlignedBB col = null;
+            try {
+                col = block.getCollisionBoundingBoxFromPool(world, x, y, z);
+            } catch (Throwable ignored) {}
+            if (col == null) {
                 return true;
             }
 
