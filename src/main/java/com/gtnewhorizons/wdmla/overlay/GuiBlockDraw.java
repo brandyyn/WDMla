@@ -2,6 +2,7 @@ package com.gtnewhorizons.wdmla.overlay;
 
 import static org.lwjgl.opengl.GL11.*;
 
+import mcp.mobius.waila.overlay.OverlayConfig;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ScaledResolution;
@@ -145,6 +146,13 @@ public class GuiBlockDraw {
     protected void drawWorld() {
 
         Minecraft mc = Minecraft.getMinecraft();
+        float fancyScale = OverlayConfig.fancyBlockScale;
+        if (fancyScale <= 0.0f) fancyScale = 1.0f;
+        glPushMatrix();
+        glTranslatef(lookAt.x, lookAt.y, lookAt.z);
+        glScalef(fancyScale, fancyScale, fancyScale);
+        glTranslatef(-lookAt.x, -lookAt.y, -lookAt.z);
+
         glEnable(GL_CULL_FACE);
         glEnable(GL12.GL_RESCALE_NORMAL);
         RenderHelper.disableStandardItemLighting();
@@ -180,17 +188,16 @@ public class GuiBlockDraw {
         ForgeHooksClient.setRenderPass(-1);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
+        glPopMatrix();
         glDepthMask(true);
     }
 
     public void renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
         if (blocksToRender == null) return;
         Minecraft mc = Minecraft.getMinecraft();
-        final int savedAo = mc.gameSettings.ambientOcclusion;
-        mc.gameSettings.ambientOcclusion = 0;
         tessellator.startDrawingQuads();
         try {
-            tessellator.setBrightness(15 << 20 | 15 << 4);
+            tessellator.setBrightness(0x00F000F0);
             for (int i = 0; i < 2; i++) {
                 int x = blocksToRender.x;
                 int y = blocksToRender.y;
@@ -198,28 +205,99 @@ public class GuiBlockDraw {
                 Block block = Minecraft.getMinecraft().theWorld.getBlock(x, y, z);
                 if (block.equals(Blocks.air) || !block.canRenderInPass(i)) continue;
 
-                bufferBuilder.blockAccess = Minecraft.getMinecraft().theWorld;
+                bufferBuilder.blockAccess = new FullBrightIsolatedBlockAccess(mc.theWorld, blocksToRender);
+                bufferBuilder.enableAO = true;
                 bufferBuilder.setRenderBounds(0, 0, 0, 1, 1, 1);
                 bufferBuilder.renderAllFaces = true;
                 bufferBuilder.renderBlockByRenderType(block, x, y, z);
             }
         } finally {
-            mc.gameSettings.ambientOcclusion = savedAo;
             tessellator.draw();
             tessellator.setTranslation(0, 0, 0);
         }
     }
 
-    public static void setDefaultPassRenderState(int pass) {
-        glColor4f(1, 1, 1, 1);
-        if (pass == 0) { // SOLID
-            glEnable(GL_DEPTH_TEST);
-            glDisable(GL_BLEND);
-            glDepthMask(true);
-        } else { // TRANSLUCENT
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glDepthMask(false);
-        }
+private static final class FullBrightIsolatedBlockAccess implements net.minecraft.world.IBlockAccess {
+    private final net.minecraft.world.IBlockAccess delegate;
+    private final int tx;
+    private final int ty;
+    private final int tz;
+
+    private FullBrightIsolatedBlockAccess(net.minecraft.world.IBlockAccess delegate, BlockPos target) {
+        this.delegate = delegate;
+        this.tx = target.x;
+        this.ty = target.y;
+        this.tz = target.z;
     }
+
+    private boolean isTarget(int x, int y, int z) {
+        return x == tx && y == ty && z == tz;
+    }
+
+    @Override
+    public net.minecraft.block.Block getBlock(int x, int y, int z) {
+        return isTarget(x, y, z) ? delegate.getBlock(x, y, z) : net.minecraft.init.Blocks.air;
+    }
+
+    @Override
+    public net.minecraft.tileentity.TileEntity getTileEntity(int x, int y, int z) {
+        return isTarget(x, y, z) ? delegate.getTileEntity(x, y, z) : null;
+    }
+
+    @Override
+    public int getLightBrightnessForSkyBlocks(int x, int y, int z, int p_72802_4_) {
+        return 0x00F000F0;
+    }
+
+    @Override
+    public int getBlockMetadata(int x, int y, int z) {
+        return isTarget(x, y, z) ? delegate.getBlockMetadata(x, y, z) : 0;
+    }
+
+    @Override
+    public boolean isAirBlock(int x, int y, int z) {
+        return !isTarget(x, y, z) || delegate.isAirBlock(x, y, z);
+    }
+
+    @Override
+    public net.minecraft.world.biome.BiomeGenBase getBiomeGenForCoords(int x, int z) {
+        return delegate.getBiomeGenForCoords(x, z);
+    }
+
+    @Override
+    public int getHeight() {
+        return delegate.getHeight();
+    }
+
+    @Override
+    public boolean extendedLevelsInChunkCache() {
+        return delegate.extendedLevelsInChunkCache();
+    }
+
+
+    @Override
+    public boolean isSideSolid(int x, int y, int z, net.minecraftforge.common.util.ForgeDirection side, boolean _default) {
+        return isTarget(x, y, z) && delegate.isSideSolid(x, y, z, side, _default);
+    }
+
+    @Override
+    public int isBlockProvidingPowerTo(int x, int y, int z, int side) {
+        return isTarget(x, y, z) ? delegate.isBlockProvidingPowerTo(x, y, z, side) : 0;
+    }
+
+}
+
+
+    public static void setDefaultPassRenderState(int pass) {
+            glColor4f(1, 1, 1, 1);
+            if (pass == 0) { // SOLID
+                glEnable(GL_DEPTH_TEST);
+                glDisable(GL_BLEND);
+                glDepthMask(true);
+            } else { // TRANSLUCENT
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(false);
+            }
+        }
 }
