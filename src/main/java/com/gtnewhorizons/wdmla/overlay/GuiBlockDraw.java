@@ -238,7 +238,6 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
             // Use a full-bright IBlockAccess wrapper, but do NOT mutate global GameSettings (prevents dynamic light flicker).
             bufferBuilder.blockAccess = new HudIsolatedFullBrightBlockAccess(mc.theWorld, blocksToRender.x, blocksToRender.y, blocksToRender.z);
             bufferBuilder.enableAO = false;
-            bufferBuilder.setRenderBounds(0, 0, 0, 1, 1, 1);
             bufferBuilder.renderAllFaces = true;
 
             // Determine which world positions to render (some blocks span multiple blocks).
@@ -274,6 +273,11 @@ for (int pass = 0; pass < 2; pass++) {
 
         Block block = mc.theWorld.getBlock(x, y, z);
         if (block == null || block == Blocks.air || !block.canRenderInPass(pass)) continue;
+
+
+        // Ensure the block's bounds match its in-world state (fixes slabs/stairs/etc rendering as full cubes).
+        block.setBlockBoundsBasedOnState(bufferBuilder.blockAccess, x, y, z);
+        bufferBuilder.setRenderBoundsFromBlock(block);
 
         // For standard cube rendering, call the non-AO path directly (avoids RenderBlocks consulting global AO settings).
         int rt = block.getRenderType();
