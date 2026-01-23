@@ -278,14 +278,30 @@ public class RayTracing {
             Block mouseoverBlock = world.getBlock(x, y, z);
 
             if (mouseoverBlock == null || mouseoverBlock.isAir(world, x, y, z)) return items;
+            try {
+                ItemStack pick = mouseoverBlock.getPickBlock(position, world, x, y, z);
+                if (pick != null && pick.getItem() != null) {
+                    items.add(pick);
+                    return items;
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                net.minecraft.item.Item item = net.minecraft.item.Item.getItemFromBlock(mouseoverBlock);
+                if (item != null) {
+                    items.add(new ItemStack(item, 1, world.getBlockMetadata(x, y, z)));
+                    return items;
+                }
+            } catch (Throwable ignored) {}
 
             if (mouseoverBlock instanceof IShearable) {
-                items.addAll(
-                        ((IShearable) mouseoverBlock)
-                                .onSheared(new ItemStack(Items.shears), world, x, y, z, 0));
+                try {
+                    for (ItemStack s : ((IShearable) mouseoverBlock)
+                            .onSheared(new ItemStack(Items.shears), world, x, y, z, 0)) {
+                        if (s != null && s.getItem() != null) items.add(s);
+                    }
+                } catch (Throwable ignored) {}
             }
-
-            if (items.isEmpty()) items.add(0, new ItemStack(mouseoverBlock, 1, world.getBlockMetadata(x, y, z)));
 
             return items;
         }

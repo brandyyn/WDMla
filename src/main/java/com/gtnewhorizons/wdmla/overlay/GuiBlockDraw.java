@@ -40,9 +40,42 @@ public class GuiBlockDraw {
 
     public static void drawWorldBlock(int x, int y, int width, int height, int blockX, int blockY, int blockZ,
             float rotationYaw, float rotationPitch) {
-        Vector3f center = new Vector3f(blockX + 0.5f, blockY + 0.5f, blockZ + 0.5f);
-
         Minecraft mc = Minecraft.getMinecraft();
+
+// Center the camera on the full multi-block shape for doors/beds/double plants.
+Block baseBlock = mc.theWorld.getBlock(blockX, blockY, blockZ);
+int baseMeta = mc.theWorld.getBlockMetadata(blockX, blockY, blockZ);
+
+int minX = blockX, minY = blockY, minZ = blockZ;
+int maxX = blockX, maxY = blockY, maxZ = blockZ;
+
+if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock instanceof net.minecraft.block.BlockDoor) {
+    if ((baseMeta & 8) == 0) { // lower
+        maxY = blockY + 1;
+    } else { // upper
+        minY = blockY - 1;
+    }
+} else if (baseBlock instanceof net.minecraft.block.BlockBed) {
+    int facing = baseMeta & 3;
+    int dx = 0, dz = 0;
+    if (facing == 0) dz = 1;
+    else if (facing == 1) dx = -1;
+    else if (facing == 2) dz = -1;
+    else if (facing == 3) dx = 1;
+
+    boolean isHead = (baseMeta & 8) != 0;
+    int ox = isHead ? (blockX - dx) : (blockX + dx);
+    int oz = isHead ? (blockZ - dz) : (blockZ + dz);
+
+    minX = Math.min(minX, ox);
+    maxX = Math.max(maxX, ox);
+    minZ = Math.min(minZ, oz);
+    maxZ = Math.max(maxZ, oz);
+}
+
+// Average of the bounding box of all blocks we will render.
+Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f + 0.5f, (minZ + maxZ) * 0.5f + 0.5f);
+
         ScaledResolution resolution = new ScaledResolution(mc, mc.displayWidth, mc.displayHeight);
         // compute window size from scaled width & height
         int windowWidth = getScaledX(mc, resolution, width);
@@ -194,69 +227,140 @@ public class GuiBlockDraw {
 
     public void renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
         if (blocksToRender == null) return;
+
         Minecraft mc = Minecraft.getMinecraft();
+
         tessellator.startDrawingQuads();
         try {
+            // Full-bright lightmap for HUD rendering.
             tessellator.setBrightness(0x00F000F0);
-            for (int i = 0; i < 2; i++) {
-                int x = blocksToRender.x;
-                int y = blocksToRender.y;
-                int z = blocksToRender.z;
-                Block block = Minecraft.getMinecraft().theWorld.getBlock(x, y, z);
-                if (block.equals(Blocks.air) || !block.canRenderInPass(i)) continue;
 
-                bufferBuilder.blockAccess = new FullBrightIsolatedBlockAccess(mc.theWorld, blocksToRender);
-                bufferBuilder.enableAO = true;
-                bufferBuilder.setRenderBounds(0, 0, 0, 1, 1, 1);
-                bufferBuilder.renderAllFaces = true;
-                bufferBuilder.renderBlockByRenderType(block, x, y, z);
-            }
+            // Use a full-bright IBlockAccess wrapper, but do NOT mutate global GameSettings (prevents dynamic light flicker).
+            bufferBuilder.blockAccess = new HudIsolatedFullBrightBlockAccess(mc.theWorld, blocksToRender.x, blocksToRender.y, blocksToRender.z);
+            bufferBuilder.enableAO = false;
+            bufferBuilder.setRenderBounds(0, 0, 0, 1, 1, 1);
+            bufferBuilder.renderAllFaces = true;
+
+            // Determine which world positions to render (some blocks span multiple blocks).
+final java.util.ArrayList<BlockPos> toRender = new java.util.ArrayList<BlockPos>(2);
+toRender.add(blocksToRender);
+
+Block baseBlock = mc.theWorld.getBlock(blocksToRender.x, blocksToRender.y, blocksToRender.z);
+int baseMeta = mc.theWorld.getBlockMetadata(blocksToRender.x, blocksToRender.y, blocksToRender.z);
+
+if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock instanceof net.minecraft.block.BlockDoor) {
+    if ((baseMeta & 8) == 0) toRender.add(new BlockPos(blocksToRender.x, blocksToRender.y + 1, blocksToRender.z));
+    else toRender.add(new BlockPos(blocksToRender.x, blocksToRender.y - 1, blocksToRender.z));
+} else if (baseBlock instanceof net.minecraft.block.BlockBed) {
+    int facing = baseMeta & 3;
+    int dx = 0, dz = 0;
+    if (facing == 0) dz = 1;
+    else if (facing == 1) dx = -1;
+    else if (facing == 2) dz = -1;
+    else if (facing == 3) dx = 1;
+
+    boolean isHead = (baseMeta & 8) != 0;
+    int ox = isHead ? (blocksToRender.x - dx) : (blocksToRender.x + dx);
+    int oz = isHead ? (blocksToRender.z - dz) : (blocksToRender.z + dz);
+    toRender.add(new BlockPos(ox, blocksToRender.y, oz));
+}
+
+for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < toRender.size(); i++) {
+        BlockPos p = toRender.get(i);
+        int x = p.x;
+        int y = p.y;
+        int z = p.z;
+
+        Block block = mc.theWorld.getBlock(x, y, z);
+        if (block == null || block == Blocks.air || !block.canRenderInPass(pass)) continue;
+
+        // For standard cube rendering, call the non-AO path directly (avoids RenderBlocks consulting global AO settings).
+        int rt = block.getRenderType();
+        if (rt == 0) {
+            bufferBuilder.renderStandardBlock(block, x, y, z);
+        } else {
+            bufferBuilder.renderBlockByRenderType(block, x, y, z);
+        }
+    }
+}
         } finally {
             tessellator.draw();
             tessellator.setTranslation(0, 0, 0);
         }
     }
 
-private static final class FullBrightIsolatedBlockAccess implements net.minecraft.world.IBlockAccess {
+private static final class HudIsolatedFullBrightBlockAccess implements net.minecraft.world.IBlockAccess {
     private final net.minecraft.world.IBlockAccess delegate;
-    private final int tx;
-    private final int ty;
-    private final int tz;
+    private final java.util.HashSet<Long> include;
 
-    private FullBrightIsolatedBlockAccess(net.minecraft.world.IBlockAccess delegate, BlockPos target) {
+    private HudIsolatedFullBrightBlockAccess(net.minecraft.world.IBlockAccess delegate, int cx, int cy, int cz) {
         this.delegate = delegate;
-        this.tx = target.x;
-        this.ty = target.y;
-        this.tz = target.z;
+        this.include = new java.util.HashSet<Long>(4);
+
+        // Always include the target block.
+        includePos(cx, cy, cz);
+
+        // Include linked halves for multi-block plants/doors/beds so they can render correctly in isolation.
+        net.minecraft.block.Block b = delegate.getBlock(cx, cy, cz);
+        int meta = delegate.getBlockMetadata(cx, cy, cz);
+
+        if (b instanceof net.minecraft.block.BlockDoublePlant) {
+            // Bit 3 (8) indicates TOP half.
+            if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
+            else includePos(cx, cy - 1, cz);
+        } else if (b instanceof net.minecraft.block.BlockDoor) {
+            if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
+            else includePos(cx, cy - 1, cz);
+        } else if (b instanceof net.minecraft.block.BlockBed) {
+            // Bed uses head/foot flag (8) and facing in the lower bits.
+            int facing = meta & 3;
+            int dx = 0, dz = 0;
+            if (facing == 0) dz = 1;
+            else if (facing == 1) dx = -1;
+            else if (facing == 2) dz = -1;
+            else if (facing == 3) dx = 1;
+
+            if ((meta & 8) == 0) includePos(cx + dx, cy, cz + dz);
+            else includePos(cx - dx, cy, cz - dz);
+        }
     }
 
-    private boolean isTarget(int x, int y, int z) {
-        return x == tx && y == ty && z == tz;
+    private void includePos(int x, int y, int z) {
+        include.add((((long)x & 0x3FFFFFFL) << 38) | (((long)z & 0x3FFFFFFL) << 12) | ((long)y & 0xFFFL));
     }
 
+    private boolean isIncluded(int x, int y, int z) {
+        long key = (((long)x & 0x3FFFFFFL) << 38) | (((long)z & 0x3FFFFFFL) << 12) | ((long)y & 0xFFFL);
+        return include.contains(key);
+    }
     @Override
     public net.minecraft.block.Block getBlock(int x, int y, int z) {
-        return isTarget(x, y, z) ? delegate.getBlock(x, y, z) : net.minecraft.init.Blocks.air;
+        if (!isIncluded(x, y, z)) return net.minecraft.init.Blocks.air;
+        return delegate.getBlock(x, y, z);
     }
 
     @Override
     public net.minecraft.tileentity.TileEntity getTileEntity(int x, int y, int z) {
-        return isTarget(x, y, z) ? delegate.getTileEntity(x, y, z) : null;
+        if (!isIncluded(x, y, z)) return null;
+        return delegate.getTileEntity(x, y, z);
     }
 
     @Override
     public int getLightBrightnessForSkyBlocks(int x, int y, int z, int p_72802_4_) {
+        // Full-bright lightmap coords (same value vanilla uses for maximum brightness)
         return 0x00F000F0;
     }
 
     @Override
     public int getBlockMetadata(int x, int y, int z) {
-        return isTarget(x, y, z) ? delegate.getBlockMetadata(x, y, z) : 0;
+        if (!isIncluded(x, y, z)) return 0;
+        return delegate.getBlockMetadata(x, y, z);
     }
 
     @Override
     public boolean isAirBlock(int x, int y, int z) {
-        return !isTarget(x, y, z) || delegate.isAirBlock(x, y, z);
+        return getBlock(x, y, z) == net.minecraft.init.Blocks.air;
     }
 
     @Override
@@ -274,15 +378,17 @@ private static final class FullBrightIsolatedBlockAccess implements net.minecraf
         return delegate.extendedLevelsInChunkCache();
     }
 
-
-    @Override
-    public boolean isSideSolid(int x, int y, int z, net.minecraftforge.common.util.ForgeDirection side, boolean _default) {
-        return isTarget(x, y, z) && delegate.isSideSolid(x, y, z, side, _default);
-    }
-
     @Override
     public int isBlockProvidingPowerTo(int x, int y, int z, int side) {
-        return isTarget(x, y, z) ? delegate.isBlockProvidingPowerTo(x, y, z, side) : 0;
+        if (!isIncluded(x, y, z)) return 0;
+        return delegate.isBlockProvidingPowerTo(x, y, z, side);
+    }
+    @Override
+    public boolean isSideSolid(int x, int y, int z,
+                              net.minecraftforge.common.util.ForgeDirection side,
+                              boolean _default) {
+        if (!isIncluded(x, y, z)) return false;
+        return delegate.isSideSolid(x, y, z, side, _default);
     }
 
 }
