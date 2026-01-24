@@ -288,6 +288,9 @@ for (int pass = 0; pass < 2; pass++) {
             // render correctly via the standard block renderer. The main case we want to avoid here is
             // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
             int meta = mc.theWorld.getBlockMetadata(x, y, z);
+            if (block == Blocks.grass) {
+                meta = 0; // force normal grass in HUD
+            }
             if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
                 bufferBuilder.renderStandardBlock(block, x, y, z);
             } else {
@@ -370,6 +373,11 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
     @Override
     public int getBlockMetadata(int x, int y, int z) {
         if (!isIncluded(x, y, z)) return 0;
+        Block b = delegate.getBlock(x, y, z);
+        if (b == Blocks.grass) {
+            return 0;
+        }
+
         return delegate.getBlockMetadata(x, y, z);
     }
 
