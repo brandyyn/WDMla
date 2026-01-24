@@ -271,7 +271,7 @@ for (int pass = 0; pass < 2; pass++) {
         int y = p.y;
         int z = p.z;
 
-        Block block = mc.theWorld.getBlock(x, y, z);
+        Block block = bufferBuilder.blockAccess.getBlock(x, y, z);
         if (block == null || block == Blocks.air || !block.canRenderInPass(pass)) continue;
 
 
@@ -287,10 +287,7 @@ for (int pass = 0; pass < 2; pass++) {
             // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
             // render correctly via the standard block renderer. The main case we want to avoid here is
             // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
-            int meta = mc.theWorld.getBlockMetadata(x, y, z);
-            if (block == Blocks.grass) {
-                meta = 0; // force normal grass in HUD
-            }
+            int meta = bufferBuilder.blockAccess.getBlockMetadata(x, y, z);
             if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
                 bufferBuilder.renderStandardBlock(block, x, y, z);
             } else {
@@ -304,13 +301,64 @@ for (int pass = 0; pass < 2; pass++) {
 }
         } finally {
             tessellator.draw();
-            tessellator.setTranslation(0, 0, 0);
         }
     }
 
 private static final class HudIsolatedFullBrightBlockAccess implements net.minecraft.world.IBlockAccess {
     private final net.minecraft.world.IBlockAccess delegate;
     private final java.util.HashSet<Long> include;
+
+
+	    private static final net.minecraft.block.Block PREVIEW_GRASS = new net.minecraft.block.Block(net.minecraft.block.material.Material.grass) {
+	        @Override
+	        public net.minecraft.util.IIcon getIcon(int side, int meta) {
+	            return net.minecraft.init.Blocks.grass.getIcon(side, meta);
+	        }
+
+	        @Override
+	        public net.minecraft.util.IIcon getIcon(net.minecraft.world.IBlockAccess world, int x, int y, int z, int side) {
+	            int meta = 0;
+	            try {
+	                meta = world.getBlockMetadata(x, y, z);
+	            } catch (Throwable ignored) {}
+	            return net.minecraft.init.Blocks.grass.getIcon(side, meta);
+	        }
+
+	        @Override
+	        public int colorMultiplier(net.minecraft.world.IBlockAccess world, int x, int y, int z) {
+	            return net.minecraft.init.Blocks.grass.colorMultiplier(world, x, y, z);
+	        }
+
+	        @Override
+	        public int getRenderColor(int meta) {
+	            return net.minecraft.init.Blocks.grass.getRenderColor(meta);
+	        }
+
+	        @Override
+	        public int getBlockColor() {
+	            return net.minecraft.init.Blocks.grass.getBlockColor();
+	        }
+
+	        @Override
+	        public boolean renderAsNormalBlock() {
+	            return true;
+	        }
+
+	        @Override
+	        public boolean isOpaqueCube() {
+	            return true;
+	        }
+
+	        @Override
+	        public int getRenderType() {
+	            return 0;
+	        }
+
+	        @Override
+	        public int getRenderBlockPass() {
+	            return 0;
+	        }
+	    };
 
     private HudIsolatedFullBrightBlockAccess(net.minecraft.world.IBlockAccess delegate, int cx, int cy, int cz) {
         this.delegate = delegate;
@@ -355,7 +403,15 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
     @Override
     public net.minecraft.block.Block getBlock(int x, int y, int z) {
         if (!isIncluded(x, y, z)) return net.minecraft.init.Blocks.air;
-        return delegate.getBlock(x, y, z);
+        net.minecraft.block.Block b = delegate.getBlock(x, y, z);
+        if (b == net.minecraft.init.Blocks.snow || b == net.minecraft.init.Blocks.snow_layer) {
+            return net.minecraft.init.Blocks.air;
+        }
+        if (b == net.minecraft.init.Blocks.grass) {
+            return PREVIEW_GRASS;
+        }
+
+        return b;
     }
 
     @Override
@@ -373,11 +429,6 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
     @Override
     public int getBlockMetadata(int x, int y, int z) {
         if (!isIncluded(x, y, z)) return 0;
-        Block b = delegate.getBlock(x, y, z);
-        if (b == Blocks.grass) {
-            return 0;
-        }
-
         return delegate.getBlockMetadata(x, y, z);
     }
 
