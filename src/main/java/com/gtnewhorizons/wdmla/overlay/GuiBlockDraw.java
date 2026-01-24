@@ -279,10 +279,21 @@ for (int pass = 0; pass < 2; pass++) {
         block.setBlockBoundsBasedOnState(bufferBuilder.blockAccess, x, y, z);
         bufferBuilder.setRenderBoundsFromBlock(block);
 
-        // For standard cube rendering, call the non-AO path directly (avoids RenderBlocks consulting global AO settings).
+        // For standard cube rendering, only use the "standard" path if the block actually renders as a normal block.
+        // Some TESR-based blocks (e.g. DeepResonance crystals) report renderType == 0 but renderAsNormalBlock() == false.
+        // Rendering them as a standard cube makes them appear as a full block in the HUD.
         int rt = block.getRenderType();
         if (rt == 0) {
-            bufferBuilder.renderStandardBlock(block, x, y, z);
+            // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
+            // render correctly via the standard block renderer. The main case we want to avoid here is
+            // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
+            int meta = mc.theWorld.getBlockMetadata(x, y, z);
+            if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
+                bufferBuilder.renderStandardBlock(block, x, y, z);
+            } else {
+                // Skip cube rendering; the TESR (if any) will render the proper model.
+                continue;
+            }
         } else {
             bufferBuilder.renderBlockByRenderType(block, x, y, z);
         }
