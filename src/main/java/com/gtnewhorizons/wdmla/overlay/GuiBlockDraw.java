@@ -7,12 +7,14 @@ import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.RenderBlocks;
+import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.init.Blocks;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.IIcon;
 import net.minecraftforge.client.ForgeHooksClient;
 
 import org.joml.Vector3f;
@@ -46,6 +48,18 @@ public class GuiBlockDraw {
 Block baseBlock = mc.theWorld.getBlock(blockX, blockY, blockZ);
 int baseMeta = mc.theWorld.getBlockMetadata(blockX, blockY, blockZ);
 
+// Some multi-block / 2-tall blocks (e.g. Waystones) have their TileEntity or TESR only on the lower half.
+// If we are looking at the upper half, shift rendering to the lower half so the fancy preview works.
+TileEntity teHere = mc.theWorld.getTileEntity(blockX, blockY, blockZ);
+if (teHere == null) {
+    TileEntity teBelow = mc.theWorld.getTileEntity(blockX, blockY - 1, blockZ);
+    if (teBelow != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(teBelow)) {
+        blockY -= 1;
+        baseBlock = mc.theWorld.getBlock(blockX, blockY, blockZ);
+        baseMeta = mc.theWorld.getBlockMetadata(blockX, blockY, blockZ);
+    }
+}
+
 int minX = blockX, minY = blockY, minZ = blockZ;
 int maxX = blockX, maxY = blockY, maxZ = blockZ;
 
@@ -71,6 +85,18 @@ if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock insta
     maxX = Math.max(maxX, ox);
     minZ = Math.min(minZ, oz);
     maxZ = Math.max(maxZ, oz);
+}
+
+
+// Waystones are two-block tall like doors; include both halves for centering (no lighting/AO changes).
+if (isWaystoneBlock(baseBlock)) {
+    Block above = mc.theWorld.getBlock(blockX, blockY + 1, blockZ);
+    Block below = mc.theWorld.getBlock(blockX, blockY - 1, blockZ);
+    if (above == baseBlock) {
+        maxY = blockY + 1;
+    } else if (below == baseBlock) {
+        minY = blockY - 1;
+    }
 }
 
 // Average of the bounding box of all blocks we will render.
@@ -174,6 +200,9 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         // reset attributes
         glPopClientAttrib();
         glPopAttrib();
+
+        // Restore lightmap state so HUD rendering never affects in-world shading/AO.
+        Minecraft.getMinecraft().entityRenderer.enableLightmap(0);
     }
 
     protected void drawWorld() {
@@ -214,7 +243,25 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
             TileEntity tile = Minecraft.getMinecraft().theWorld.getTileEntity(x, y, z);
             if (tile != null && tesr.hasSpecialRenderer(tile)) {
                 if (tile.shouldRenderInPass(finalPass)) {
-                    tesr.renderTileEntityAt(tile, x, y, z, 0);
+            // Waystones: HUD-only render should ignore lighting/AO influence from the world/hand.
+            if (isWaystoneBlock(mc.theWorld.getBlock(x, y, z))) {
+                // Save current lightmap + lighting state, force fullbright for just this TESR draw.
+                final float prevX = OpenGlHelper.lastBrightnessX;
+                final float prevY = OpenGlHelper.lastBrightnessY;
+                final boolean wasLighting = GL11.glIsEnabled(GL11.GL_LIGHTING);
+
+                OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, 240f, 240f);
+                GL11.glDisable(GL11.GL_LIGHTING);
+                GL11.glColor4f(1f, 1f, 1f, 1f);
+
+                tesr.renderTileEntityAt(tile, x, y, z, 0);
+
+                // Restore previous state.
+                if (wasLighting) GL11.glEnable(GL11.GL_LIGHTING);
+                OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, prevX, prevY);
+            } else {
+                tesr.renderTileEntityAt(tile, x, y, z, 0);
+            }
                 }
             }
         }
@@ -264,6 +311,15 @@ if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock insta
     toRender.add(new BlockPos(ox, blocksToRender.y, oz));
 }
 
+if (isWaystoneBlock(baseBlock)) {
+    Block above = mc.theWorld.getBlock(blocksToRender.x, blocksToRender.y + 1, blocksToRender.z);
+    Block below = mc.theWorld.getBlock(blocksToRender.x, blocksToRender.y - 1, blocksToRender.z);
+    if (above == baseBlock) toRender.add(new BlockPos(blocksToRender.x, blocksToRender.y + 1, blocksToRender.z));
+    else if (below == baseBlock) toRender.add(new BlockPos(blocksToRender.x, blocksToRender.y - 1, blocksToRender.z));
+}
+
+
+
 for (int pass = 0; pass < 2; pass++) {
     for (int i = 0; i < toRender.size(); i++) {
         BlockPos p = toRender.get(i);
@@ -279,25 +335,86 @@ for (int pass = 0; pass < 2; pass++) {
         block.setBlockBoundsBasedOnState(bufferBuilder.blockAccess, x, y, z);
         bufferBuilder.setRenderBoundsFromBlock(block);
 
-        // For standard cube rendering, only use the "standard" path if the block actually renders as a normal block.
-        // Some TESR-based blocks (e.g. DeepResonance crystals) report renderType == 0 but renderAsNormalBlock() == false.
-        // Rendering them as a standard cube makes them appear as a full block in the HUD.
+// For grass blocks (vanilla + most modded), never show snowy sides in the HUD preview.
+// BlockGrass picks snowy-side textures by checking the block above in getIcon(IBlockAccess,...),
+// so we bypass the world-dependent path entirely and render using:
+//  - base dirt sides/bottom (getIcon(side, meta))
+//  - tinted top (biome tint)
+//  - tinted side overlay (getIconSideOverlay)
+
+if (block instanceof net.minecraft.block.BlockGrass) {
+    int meta = mc.theWorld.getBlockMetadata(x, y, z);
+
+    IIcon iconBottom = block.getIcon(0, meta);
+    IIcon iconTop = block.getIcon(1, meta);
+    IIcon iconSideBase = block.getIcon(2, meta);
+    IIcon iconSideOverlay = ((net.minecraft.block.BlockGrass) block).getIconSideOverlay();
+
+    int c = block.colorMultiplier(bufferBuilder.blockAccess, x, y, z);
+    float r = ((c >> 16) & 255) / 255.0f;
+    float g = ((c >> 8) & 255) / 255.0f;
+    float b = (c & 255) / 255.0f;
+
+    // Manual per-face shading (AO-look) ONLY for this isolated grass preview.
+    final float shadeBottom = 0.5f;
+    final float shadeTop = 1.0f;
+    final float shadeZ = 0.8f;
+    final float shadeX = 0.6f;
+
+    // Bottom
+    tessellator.setColorOpaque_F(shadeBottom, shadeBottom, shadeBottom);
+    bufferBuilder.renderFaceYNeg(block, (double) x, (double) y, (double) z, iconBottom);
+
+    // Top (tinted)
+    tessellator.setColorOpaque_F(r * shadeTop, g * shadeTop, b * shadeTop);
+    bufferBuilder.renderFaceYPos(block, (double) x, (double) y, (double) z, iconTop);
+
+    // Sides base
+    tessellator.setColorOpaque_F(shadeZ, shadeZ, shadeZ);
+    bufferBuilder.renderFaceZNeg(block, (double) x, (double) y, (double) z, iconSideBase);
+    bufferBuilder.renderFaceZPos(block, (double) x, (double) y, (double) z, iconSideBase);
+
+    tessellator.setColorOpaque_F(shadeX, shadeX, shadeX);
+    bufferBuilder.renderFaceXNeg(block, (double) x, (double) y, (double) z, iconSideBase);
+    bufferBuilder.renderFaceXPos(block, (double) x, (double) y, (double) z, iconSideBase);
+
+    // Sides overlay (tinted)
+    tessellator.setColorOpaque_F(r * shadeZ, g * shadeZ, b * shadeZ);
+    bufferBuilder.renderFaceZNeg(block, (double) x, (double) y, (double) z, iconSideOverlay);
+    bufferBuilder.renderFaceZPos(block, (double) x, (double) y, (double) z, iconSideOverlay);
+
+    tessellator.setColorOpaque_F(r * shadeX, g * shadeX, b * shadeX);
+    bufferBuilder.renderFaceXNeg(block, (double) x, (double) y, (double) z, iconSideOverlay);
+    bufferBuilder.renderFaceXPos(block, (double) x, (double) y, (double) z, iconSideOverlay);
+
+    // Reset color
+    tessellator.setColorOpaque_F(1.0f, 1.0f, 1.0f);
+    continue;
+}
+
+        // For standard cube rendering, call the non-AO path directly (avoids RenderBlocks consulting global AO settings).
         int rt = block.getRenderType();
-        if (rt == 0) {
-            // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
-            // render correctly via the standard block renderer. The main case we want to avoid here is
-            // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
-            int meta = mc.theWorld.getBlockMetadata(x, y, z);
-            if (block == Blocks.grass) {
-                meta = 0; // force normal grass in HUD
-            }
-            if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
-                bufferBuilder.renderStandardBlock(block, x, y, z);
-            } else {
-                // Skip cube rendering; the TESR (if any) will render the proper model.
-                continue;
-            }
-        } else {
+if (rt == 0) {
+    // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
+    // render correctly via the standard block renderer. The main case we want to avoid here is
+    // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
+    int meta = mc.theWorld.getBlockMetadata(x, y, z);
+    TileEntity te = mc.theWorld.getTileEntity(x, y, z);
+    boolean hasTesr = te != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(te);
+
+    if (!block.renderAsNormalBlock() && hasTesr) {
+        // Skip cube rendering; the TESR will render the proper model.
+        continue;
+    }
+
+    if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
+        bufferBuilder.renderStandardBlock(block, x, y, z);
+    } else {
+        // Skip cube rendering; the TESR (if any) will render the proper model.
+        continue;
+    }
+} else {
+
             bufferBuilder.renderBlockByRenderType(block, x, y, z);
         }
     }
@@ -308,41 +425,62 @@ for (int pass = 0; pass < 2; pass++) {
         }
     }
 
+private static boolean isWaystoneBlock(net.minecraft.block.Block b) {
+    if (b == null) return false;
+    Object regNameObj = net.minecraft.block.Block.blockRegistry.getNameForObject(b);
+    String reg = regNameObj != null ? regNameObj.toString() : "";
+    String unloc = b.getUnlocalizedName();
+    String cls = b.getClass().getName();
+    String s = (reg + " " + unloc + " " + cls).toLowerCase(java.util.Locale.ROOT);
+    return s.contains("waystone");
+}
+
+
+
 private static final class HudIsolatedFullBrightBlockAccess implements net.minecraft.world.IBlockAccess {
     private final net.minecraft.world.IBlockAccess delegate;
     private final java.util.HashSet<Long> include;
 
     private HudIsolatedFullBrightBlockAccess(net.minecraft.world.IBlockAccess delegate, int cx, int cy, int cz) {
-        this.delegate = delegate;
-        this.include = new java.util.HashSet<Long>(4);
+    this.delegate = delegate;
+    this.include = new java.util.HashSet<Long>(6);
 
-        // Always include the target block.
-        includePos(cx, cy, cz);
 
-        // Include linked halves for multi-block plants/doors/beds so they can render correctly in isolation.
-        net.minecraft.block.Block b = delegate.getBlock(cx, cy, cz);
-        int meta = delegate.getBlockMetadata(cx, cy, cz);
+    includePos(cx, cy, cz);
+    // IMPORTANT:
+    // Do NOT include generic neighbors (above/below/sides). Many blocks change shading/textures based on neighbor lookups
+    // (AO, snow checks, CTM/texturepack logic, etc.).
+    net.minecraft.block.Block b = delegate.getBlock(cx, cy, cz);
+    int meta = delegate.getBlockMetadata(cx, cy, cz);
 
-        if (b instanceof net.minecraft.block.BlockDoublePlant) {
-            // Bit 3 (8) indicates TOP half.
-            if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
-            else includePos(cx, cy - 1, cz);
-        } else if (b instanceof net.minecraft.block.BlockDoor) {
-            if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
-            else includePos(cx, cy - 1, cz);
-        } else if (b instanceof net.minecraft.block.BlockBed) {
-            // Bed uses head/foot flag (8) and facing in the lower bits.
-            int facing = meta & 3;
-            int dx = 0, dz = 0;
-            if (facing == 0) dz = 1;
-            else if (facing == 1) dx = -1;
-            else if (facing == 2) dz = -1;
-            else if (facing == 3) dx = 1;
+    // Minimal "multi-block" support: include only the linked half for known two-block structures.
+    if (b instanceof net.minecraft.block.BlockDoublePlant) {
+        if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
+        else includePos(cx, cy - 1, cz);
+    } else if (b instanceof net.minecraft.block.BlockDoor) {
+        if ((meta & 8) == 0) includePos(cx, cy + 1, cz);
+        else includePos(cx, cy - 1, cz);
+    } else if (b instanceof net.minecraft.block.BlockBed) {
+        int facing = meta & 3;
+        int dx = 0, dz = 0;
+        if (facing == 0) dz = 1;
+        else if (facing == 1) dx = -1;
+        else if (facing == 2) dz = -1;
+        else if (facing == 3) dx = 1;
 
-            if ((meta & 8) == 0) includePos(cx + dx, cy, cz + dz);
-            else includePos(cx - dx, cy, cz - dz);
-        }
+        if ((meta & 8) == 0) includePos(cx + dx, cy, cz + dz);
+        else includePos(cx - dx, cy, cz - dz);
+    } else if (isWaystoneBlock(b)) {
+        // Door-style: include only the other half if it is the same block.
+        net.minecraft.block.Block above = delegate.getBlock(cx, cy + 1, cz);
+        net.minecraft.block.Block below = delegate.getBlock(cx, cy - 1, cz);
+        if (above == b) includePos(cx, cy + 1, cz);
+        else if (below == b) includePos(cx, cy - 1, cz);
+    } else if (b == net.minecraft.init.Blocks.snow_layer) {
+        // Snow layer needs the block below to exist for proper rendering (but still don't include anything else).
+        includePos(cx, cy - 1, cz);
     }
+}
 
     private void includePos(int x, int y, int z) {
         include.add((((long)x & 0x3FFFFFFL) << 38) | (((long)z & 0x3FFFFFFL) << 12) | ((long)y & 0xFFFL));
@@ -373,11 +511,6 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
     @Override
     public int getBlockMetadata(int x, int y, int z) {
         if (!isIncluded(x, y, z)) return 0;
-        Block b = delegate.getBlock(x, y, z);
-        if (b == Blocks.grass) {
-            return 0;
-        }
-
         return delegate.getBlockMetadata(x, y, z);
     }
 

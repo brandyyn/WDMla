@@ -27,11 +27,50 @@ import com.gtnewhorizons.wdmla.wailacompat.RayTracingCompat;
 
 import mcp.mobius.waila.overlay.DisplayUtil;
 import mcp.mobius.waila.utils.ModIdentification;
+import net.minecraft.block.Block;
+import net.minecraft.init.Blocks;
 
 public enum DefaultBlockInfoProvider implements IBlockComponentProvider {
 
     INSTANCE;
 
+private static boolean isNitorBlock(BlockAccessor accessor) {
+    if (accessor == null) return false;
+    net.minecraft.block.Block b = accessor.getBlock();
+    if (b == null) return false;
+
+    int meta = accessor.getMetadata();
+
+    // Thaumcraft 4 Nitor is placed as a block variant (commonly BlockAiry / "blockAiry") with meta 1.
+    // Detect by registry/unlocalized/class name + metadata to avoid false positives.
+    Object regNameObj = net.minecraft.block.Block.blockRegistry.getNameForObject(b);
+    String regName = regNameObj != null ? regNameObj.toString() : "";
+    String unloc = b.getUnlocalizedName();
+    String cls = b.getClass().getName();
+    String s = (regName + " " + unloc + " " + cls).toLowerCase(java.util.Locale.ROOT);
+
+    if (meta == 1 && (s.contains("blockairy") || s.contains("airy") || s.contains("nitor"))) {
+        // Prefer exact airy variant match when available, but keep it permissive across TC addons.
+        return true;
+    }
+
+    // Fallback: some packs expose a registry name containing 'nitor' directly.
+    return s.contains("nitor");
+}
+
+private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
+    try {
+        Object obj = net.minecraft.item.Item.itemRegistry.getObject("Thaumcraft:ItemResource");
+        if (!(obj instanceof net.minecraft.item.Item)) obj = net.minecraft.item.Item.itemRegistry.getObject("thaumcraft:ItemResource");
+        if (!(obj instanceof net.minecraft.item.Item)) obj = net.minecraft.item.Item.itemRegistry.getObject("thaumcraft:itemResource");
+        if (obj instanceof net.minecraft.item.Item) {
+            return new net.minecraft.item.ItemStack((net.minecraft.item.Item) obj, 1, 1);
+        }
+    } catch (Throwable t) {
+        // ignore
+    }
+    return null;
+}
     @Override
     public ResourceLocation getUid() {
         return Identifiers.DEFAULT_BLOCK;
@@ -50,8 +89,14 @@ public enum DefaultBlockInfoProvider implements IBlockComponentProvider {
         // step 2: construct an actual icon
         ITooltip row = tooltip.horizontal();
         ItemStack itemStack = overrideStack != null ? overrideStack : accessor.getItemForm();
+        if (isNitorBlock(accessor)) {
+            ItemStack nitor = getThaumcraftNitorStack();
+            if (nitor != null) itemStack = nitor;
+        }
         if (PluginsConfig.core.defaultBlock.showIcon) {
-            if (PluginsConfig.core.defaultBlock.fancyRenderer == PluginsConfig.Core.fancyRendererMode.ALL
+            if (forceItemIcon(accessor)) {
+                row.child(new ItemComponent(itemStack).doDrawOverlay(false).tag(Identifiers.ITEM_ICON));
+            } else if (PluginsConfig.core.defaultBlock.fancyRenderer == PluginsConfig.Core.fancyRendererMode.ALL
                     || (PluginsConfig.core.defaultBlock.fancyRenderer == PluginsConfig.Core.fancyRendererMode.FALLBACK
                             && itemStack.getItem() == null)) {
                 row.child(
@@ -115,4 +160,20 @@ public enum DefaultBlockInfoProvider implements IBlockComponentProvider {
     public boolean isPriorityFixed() {
         return true;
     }
+private static boolean forceItemIcon(BlockAccessor accessor) {
+    Block b = accessor.getBlock();
+    if (b == null) return false;
+
+    // Thaumcraft Nitor: always show as item icon (Thaumcraft:ItemResource:1).
+        if (isNitorBlock(accessor)) return true;
+
+    // Always show ladders as the item icon (vanilla + modded ladders)
+    if (b == Blocks.ladder || b instanceof net.minecraft.block.BlockLadder) return true;
+    String unloc = b.getUnlocalizedName();
+    if (unloc != null && unloc.toLowerCase(java.util.Locale.ROOT).contains("ladder")) return true;
+
+    return false;
+}
+
+
 }
