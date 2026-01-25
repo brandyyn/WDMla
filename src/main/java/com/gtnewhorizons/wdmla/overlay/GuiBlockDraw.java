@@ -21,6 +21,7 @@ import org.joml.Vector3f;
 import org.joml.Vector4i;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
+import org.lwjgl.opengl.GL13;
 
 import com.gtnewhorizon.gtnhlib.blockpos.BlockPos;
 import com.gtnewhorizons.wdmla.util.HotSwapUtil;
@@ -37,10 +38,15 @@ public class GuiBlockDraw {
     private Vector4i rect = new Vector4i();
     private final RenderBlocks bufferBuilder = new RenderBlocks();
 
+    private float prevLightmapX;
+    private float prevLightmapY;
+    private int prevActiveTexture;
+    private boolean prevLightmapTex2DEnabled;
+
     private static final GuiBlockDraw instance = new GuiBlockDraw();
     public static final float ZOOM = 2.3f;
 
-    public static void drawWorldBlock(int x, int y, int width, int height, int blockX, int blockY, int blockZ,
+    public static boolean drawWorldBlock(int x, int y, int width, int height, int blockX, int blockY, int blockZ,
             float rotationYaw, float rotationPitch) {
         Minecraft mc = Minecraft.getMinecraft();
 
@@ -112,18 +118,20 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
 
         instance.renderedBlock = new BlockPos(blockX, blockY, blockZ);
         instance.setCameraLookAt(center, ZOOM, Math.toRadians(rotationPitch), Math.toRadians(rotationYaw));
-        instance.render(windowX, windowY, windowWidth, windowHeight);
+        return instance.render(windowX, windowY, windowWidth, windowHeight);
     }
 
-    private void render(int x, int y, int width, int height) {
+    private boolean render(int x, int y, int width, int height) {
         rect.set(x, y, width, height);
-        // setupCamera
+        // Always restore render state even if a mod block renderer throws.
         setupCamera();
-
-        // render World
-        drawWorld();
-
-        resetCamera();
+        boolean rendered = false;
+        try {
+            rendered = drawWorld();
+        } finally {
+            resetCamera();
+        }
+        return rendered;
     }
 
     public void setCameraLookAt(Vector3f lookAt, double radius, double rotationPitch, double rotationYaw) {
@@ -148,6 +156,15 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         int height = rect.w;
 
         Minecraft mc = Minecraft.getMinecraft();
+
+        prevLightmapX = OpenGlHelper.lastBrightnessX;
+        prevLightmapY = OpenGlHelper.lastBrightnessY;
+
+        prevActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GL13.glActiveTexture(OpenGlHelper.lightmapTexUnit);
+        prevLightmapTex2DEnabled = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
+        GL13.glActiveTexture(prevActiveTexture);
+
         glPushAttrib(GL_ALL_ATTRIB_BITS);
         glPushClientAttrib(GL_ALL_CLIENT_ATTRIB_BITS);
         mc.entityRenderer.disableLightmap(0);
@@ -182,7 +199,7 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         GL11.glDisable(GL11.GL_SCISSOR_TEST);
     }
 
-    public static void resetCamera() {
+    private void resetCamera() {
         // reset viewport
         Minecraft minecraft = Minecraft.getMinecraft();
         glViewport(0, 0, minecraft.displayWidth, minecraft.displayHeight);
@@ -201,15 +218,29 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         glPopClientAttrib();
         glPopAttrib();
 
-        // Restore lightmap state so HUD rendering never affects in-world shading/AO.
-        Minecraft.getMinecraft().entityRenderer.enableLightmap(0);
+        // Restore the exact lightmap + active-texture state that existed before we rendered the HUD preview.
+        // This prevents the "whole screen gets darker" leak that happens when the active texture unit is left
+        // on the lightmap (or when GL_TEXTURE_2D enable state differs per unit) near night time.
+        Minecraft mc = Minecraft.getMinecraft();
+
+        OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, prevLightmapX, prevLightmapY);
+
+        GL13.glActiveTexture(OpenGlHelper.lightmapTexUnit);
+        if (prevLightmapTex2DEnabled) GL11.glEnable(GL11.GL_TEXTURE_2D);
+        else GL11.glDisable(GL11.GL_TEXTURE_2D);
+
+        GL13.glActiveTexture(prevActiveTexture);
+
+        mc.entityRenderer.disableLightmap(0);
+
     }
 
-    protected void drawWorld() {
+    protected boolean drawWorld() {
 
         Minecraft mc = Minecraft.getMinecraft();
         float fancyScale = OverlayConfig.fancyBlockScale;
         if (fancyScale <= 0.0f) fancyScale = 1.0f;
+        boolean renderedAny = false;
         glPushMatrix();
         glTranslatef(lookAt.x, lookAt.y, lookAt.z);
         glScalef(fancyScale, fancyScale, fancyScale);
@@ -225,7 +256,7 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         glEnable(GL_ALPHA_TEST);
 
         Tessellator tessellator = Tessellator.instance;
-        renderBlocks(tessellator, renderedBlock);
+        renderedAny |= renderBlocks(tessellator, renderedBlock);
 
         RenderHelper.enableStandardItemLighting();
         glEnable(GL_LIGHTING);
@@ -254,12 +285,14 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
                 GL11.glDisable(GL11.GL_LIGHTING);
                 GL11.glColor4f(1f, 1f, 1f, 1f);
 
+                renderedAny = true;
                 tesr.renderTileEntityAt(tile, x, y, z, 0);
 
                 // Restore previous state.
                 if (wasLighting) GL11.glEnable(GL11.GL_LIGHTING);
                 OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, prevX, prevY);
             } else {
+                renderedAny = true;
                 tesr.renderTileEntityAt(tile, x, y, z, 0);
             }
                 }
@@ -270,10 +303,14 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         glDisable(GL_BLEND);
         glPopMatrix();
         glDepthMask(true);
+    
+        return renderedAny;
     }
 
-    public void renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
-        if (blocksToRender == null) return;
+        public boolean renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
+        if (blocksToRender == null) return false;
+
+        boolean renderedAny = false;
 
         Minecraft mc = Minecraft.getMinecraft();
 
@@ -389,6 +426,7 @@ if (block instanceof net.minecraft.block.BlockGrass) {
 
     // Reset color
     tessellator.setColorOpaque_F(1.0f, 1.0f, 1.0f);
+    renderedAny = true;
     continue;
 }
 
@@ -408,14 +446,14 @@ if (rt == 0) {
     }
 
     if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
-        bufferBuilder.renderStandardBlock(block, x, y, z);
+        renderedAny |= bufferBuilder.renderStandardBlock(block, x, y, z);
     } else {
         // Skip cube rendering; the TESR (if any) will render the proper model.
         continue;
     }
 } else {
 
-            bufferBuilder.renderBlockByRenderType(block, x, y, z);
+            renderedAny |= bufferBuilder.renderBlockByRenderType(block, x, y, z);
         }
     }
 }
@@ -423,6 +461,7 @@ if (rt == 0) {
             tessellator.draw();
             tessellator.setTranslation(0, 0, 0);
         }
+        return renderedAny;
     }
 
 private static boolean isWaystoneBlock(net.minecraft.block.Block b) {

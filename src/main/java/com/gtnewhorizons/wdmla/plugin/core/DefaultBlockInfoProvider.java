@@ -89,23 +89,46 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
         // step 2: construct an actual icon
         ITooltip row = tooltip.horizontal();
         ItemStack itemStack = overrideStack != null ? overrideStack : accessor.getItemForm();
+        if (itemStack == null) {
+            // Some blocks/items return null in strange modded cases. Fall back to "block -> item" mapping.
+            try {
+                net.minecraft.item.Item it = net.minecraft.item.Item.getItemFromBlock(accessor.getBlock());
+                if (it != null) itemStack = new ItemStack(it, 1, accessor.getMetadata());
+            } catch (Throwable t) {
+                // ignore
+            }
+        }
         if (isNitorBlock(accessor)) {
             ItemStack nitor = getThaumcraftNitorStack();
             if (nitor != null) itemStack = nitor;
         }
         if (PluginsConfig.core.defaultBlock.showIcon) {
-            if (forceItemIcon(accessor)) {
-                row.child(new ItemComponent(itemStack).doDrawOverlay(false).tag(Identifiers.ITEM_ICON));
-            } else if (PluginsConfig.core.defaultBlock.fancyRenderer == PluginsConfig.Core.fancyRendererMode.ALL
-                    || (PluginsConfig.core.defaultBlock.fancyRenderer == PluginsConfig.Core.fancyRendererMode.FALLBACK
-                            && itemStack.getItem() == null)) {
-                row.child(
-                        new BlockComponent(
-                                accessor.getHitResult().blockX,
-                                accessor.getHitResult().blockY,
-                                accessor.getHitResult().blockZ).tag(Identifiers.ITEM_ICON));
+            final ItemStack safeStack = itemStack != null ? itemStack : new ItemStack(Blocks.air);
+
+            if (forceItemIcon(accessor) || itemStack == null) {
+                row.child(new ItemComponent(safeStack).doDrawOverlay(false).tag(Identifiers.ITEM_ICON));
             } else {
-                row.child(new ItemComponent(itemStack).doDrawOverlay(false).tag(Identifiers.ITEM_ICON));
+                PluginsConfig.Core.fancyRendererMode mode = PluginsConfig.core.defaultBlock.fancyRenderer;
+
+                // ALL: always try fancy.
+                // FALLBACK: only use fancy when the item icon isn't usable.
+                boolean wantsFancy = mode == PluginsConfig.Core.fancyRendererMode.ALL
+                        || (mode == PluginsConfig.Core.fancyRendererMode.FALLBACK
+                                && (itemStack.getItem() == null));
+
+                // If the in-world preview can't reasonably render (invisible blocks, pure ISBRH-only blocks, etc.),
+                // always fall back to the item icon.
+                boolean canFancy = wantsFancy && canUseFancyBlockPreview(accessor);
+
+                if (canFancy) {
+                    row.child(
+                            new BlockComponent(
+                                    accessor.getHitResult().blockX,
+                                    accessor.getHitResult().blockY,
+                                    accessor.getHitResult().blockZ).tag(Identifiers.ITEM_ICON));
+                } else {
+                    row.child(new ItemComponent(safeStack).doDrawOverlay(false).tag(Identifiers.ITEM_ICON));
+                }
             }
         }
 
@@ -116,7 +139,7 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
                 String rawName = accessor.getServerData().getString("CustomName");
                 itemName = EnumChatFormatting.ITALIC + FormatUtil.formatNameByPixelCount(rawName);
             } else {
-                itemName = DisplayUtil.itemDisplayNameShortFormatted(itemStack);
+                itemName = DisplayUtil.itemDisplayNameShortFormatted(itemStack != null ? itemStack : new ItemStack(Blocks.air));
             }
             ITooltip title = row_vertical.horizontal();
             IComponent nameComponent = ThemeHelper.INSTANCE.title(itemName).tag(Identifiers.ITEM_NAME);
@@ -139,7 +162,7 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
                 }
             }.tag(Identifiers.TARGET_NAME_ROW));
         }
-        String modName = ModIdentification.nameFromStack(itemStack);
+        String modName = ModIdentification.nameFromStack(itemStack != null ? itemStack : new ItemStack(Blocks.air));
         if (PluginsConfig.core.defaultBlock.showModName) {
             Theme theme = General.currentTheme.get();
             if (modName != null) {
@@ -158,6 +181,40 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
 
     @Override
     public boolean isPriorityFixed() {
+        return true;
+    }
+
+    /**
+     * Some mod blocks are not safe/reliable to render via the in-world block preview (custom render types,
+     * invisible blocks, etc.). In those cases we fall back to the item icon even when fancy rendering is enabled.
+     */
+    private static boolean canUseFancyBlockPreview(BlockAccessor accessor) {
+        if (accessor == null) return false;
+        Block b = accessor.getBlock();
+        if (b == null || b == Blocks.air) return false;
+
+        // Absolutely invisible / special portal surfaces render poorly (or not at all) in the HUD preview.
+        if (b == Blocks.portal || b == Blocks.end_portal) return false;
+
+        int rt;
+        try {
+            rt = b.getRenderType();
+        } catch (Throwable t) {
+            return false;
+        }
+
+        // Invisible / no-render blocks.
+        if (rt < 0) return false;
+
+        // TESR blocks are fine; the preview renderer handles TESR separately.
+        try {
+            if (accessor.getTileEntity() != null
+                    && net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher.instance
+                            .hasSpecialRenderer(accessor.getTileEntity())) {
+                return true;
+            }
+        } catch (Throwable t) {
+        }
         return true;
     }
 private static boolean forceItemIcon(BlockAccessor accessor) {
