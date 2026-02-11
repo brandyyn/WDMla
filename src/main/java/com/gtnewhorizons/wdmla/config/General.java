@@ -48,6 +48,16 @@ public class General {
     @Config.Comment("Allow renamed object taking place on tooltip title")
     public static boolean customNameOverride;
 
+    @Config.LangKey("option.wdmla.general.show.modname")
+    @Config.DefaultBoolean(true)
+    @Config.Comment("Show mod names in the HUD")
+    public static boolean showModName;
+
+    @Config.LangKey("option.wdmla.general.modname.italic")
+    @Config.DefaultBoolean(true)
+    @Config.Comment("Render mod names in italics in the HUD")
+    public static boolean modNameItalic;
+
     @Config.LangKey("option.wdmla.general.maxnamelengthpixel")
     @Config.DefaultInt(150)
     @Config.RangeInt(min = 1, max = 10000)
@@ -101,6 +111,11 @@ public class General {
         @Config.LangKey("option.wdmla.general.textcolor.modname")
         @Config.DefaultInt(ColorPalette.MOD_NAME)
         public int modName;
+
+        @Config.LangKey("option.wdmla.general.textcolor.modname.override")
+        @Config.DefaultString("")
+        @Config.Comment("Override mod name color. Supports hex (#RRGGBB, 0xRRGGBB) or names like RED, BLUE, GRAY")
+        public String modNameOverride;
     }
 
     @Config.Comment("The colors used in progress bar. \n"

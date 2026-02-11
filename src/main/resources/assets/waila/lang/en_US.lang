@@ -296,6 +296,8 @@ option.wdmla.general.ghostproduct=Ghost Product
 option.wdmla.general.theme=Theme Preset
 option.wdmla.general.previewincfg=Preview in Config
 option.wdmla.general.customnameoverride=Custom Name Override
+option.wdmla.general.show.modname=Show Mod Name
+option.wdmla.general.modname.italic=Italic Mod Names
 option.wdmla.general.maxnamelengthpixel=Max Name Length (Pixel)
 option.wdmla.general.align.icon.right.top=Align Icons at Right Top Corner
 option.wdmla.general.override.waila.tooltips=Override Waila Tooltips
@@ -308,6 +310,7 @@ option.wdmla.general.textcolor.warning=Warning
 option.wdmla.general.textcolor.danger=Danger
 option.wdmla.general.textcolor.failure=Failure
 option.wdmla.general.textcolor.modname=Mod Name
+option.wdmla.general.textcolor.modname.override=Mod Name Color Override
 
 option.wdmla.progresscolor.category=Progress Bar Colors
 option.wdmla.general.progresscolor.background=Background

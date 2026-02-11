@@ -3,6 +3,7 @@ package com.gtnewhorizons.wdmla.impl.ui;
 import static mcp.mobius.waila.api.SpecialChars.ITALIC;
 
 import java.util.List;
+import java.util.Locale;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
@@ -110,9 +111,7 @@ public class ThemeHelper {
     }
 
     public void overrideTooltipModName(ITooltip root, String newName) {
-        Theme theme = General.currentTheme.get();
-        IComponent replacedModName = new TextComponent(ITALIC + newName)
-                .style(new TextStyle().color(theme.textColor(MessageType.MOD_NAME))).tag(Identifiers.MOD_NAME);
+        IComponent replacedModName = modName(newName).tag(Identifiers.MOD_NAME);
         root.replaceChildWithTag(Identifiers.MOD_NAME, replacedModName);
     }
 
@@ -120,6 +119,63 @@ public class ThemeHelper {
         overrideTooltipIcon(root, newItemStack, false);
         overrideTooltipTitle(root, newItemStack);
         overrideTooltipModName(root, newItemStack);
+    }
+
+    public IComponent modName(String modName) {
+        String content = modName == null ? "" : modName;
+        if (General.modNameItalic && !content.isEmpty()) {
+            content = ITALIC + content;
+        }
+        return new TextComponent(content).style(new TextStyle().color(resolveModNameColor()));
+    }
+
+    private int resolveModNameColor() {
+        int fallback = General.currentTheme.get().textColor(MessageType.MOD_NAME);
+        return mapColor(General.textColor.modNameOverride, fallback);
+    }
+
+    private int mapColor(String color, int fallback) {
+        if (color == null) {
+            return fallback;
+        }
+
+        String s = color.trim();
+        if (s.isEmpty()) {
+            return fallback;
+        }
+
+        String hex = s;
+        if (hex.charAt(0) == '#') {
+            hex = hex.substring(1);
+        } else if (hex.length() > 2 && (hex.startsWith("0x") || hex.startsWith("0X"))) {
+            hex = hex.substring(2);
+        }
+        if (hex.matches("(?i)[0-9a-f]{6}")) {
+            try {
+                return 0xFF000000 | Integer.parseInt(hex, 16);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+
+        String key = s.toUpperCase(Locale.ROOT);
+        return switch (key) {
+            case "RED" -> 0xFFFF0000;
+            case "GREEN" -> 0xFF00FF00;
+            case "BLUE" -> 0xFF0000FF;
+            case "YELLOW" -> 0xFFFFFF00;
+            case "ORANGE" -> 0xFFFFA500;
+            case "BLACK" -> 0xFF000000;
+            case "PURPLE" -> 0xFF960096;
+            case "WHITE" -> 0xFFFFFFFF;
+            case "GOLD" -> 0xFFFFD700;
+            case "LIME" -> 0xFF00FF00;
+            case "CYAN" -> 0xFF00FFFF;
+            case "MAGENTA" -> 0xFFFF00FF;
+            case "GRAY", "GREY" -> 0xFF808080;
+            case "LIGHT_GRAY", "LIGHTGRAY", "LIGHT_GREY", "LIGHTGREY" -> 0xFFC0C0C0;
+            default -> fallback;
+        };
     }
 
     public IComponent info(String content) {

@@ -1,27 +1,21 @@
 package com.gtnewhorizons.wdmla.plugin.core;
 
-import static mcp.mobius.waila.api.SpecialChars.*;
-
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.ResourceLocation;
 
 import com.gtnewhorizons.wdmla.api.Identifiers;
-import com.gtnewhorizons.wdmla.api.Theme;
 import com.gtnewhorizons.wdmla.api.TooltipPosition;
 import com.gtnewhorizons.wdmla.api.accessor.BlockAccessor;
 import com.gtnewhorizons.wdmla.api.provider.IBlockComponentProvider;
 import com.gtnewhorizons.wdmla.api.ui.IComponent;
 import com.gtnewhorizons.wdmla.api.ui.ITooltip;
-import com.gtnewhorizons.wdmla.api.ui.MessageType;
 import com.gtnewhorizons.wdmla.config.General;
 import com.gtnewhorizons.wdmla.config.PluginsConfig;
 import com.gtnewhorizons.wdmla.impl.ui.ThemeHelper;
 import com.gtnewhorizons.wdmla.impl.ui.component.BlockComponent;
 import com.gtnewhorizons.wdmla.impl.ui.component.HPanelComponent;
 import com.gtnewhorizons.wdmla.impl.ui.component.ItemComponent;
-import com.gtnewhorizons.wdmla.impl.ui.component.TextComponent;
-import com.gtnewhorizons.wdmla.impl.ui.style.TextStyle;
 import com.gtnewhorizons.wdmla.util.FormatUtil;
 import com.gtnewhorizons.wdmla.wailacompat.RayTracingCompat;
 
@@ -163,19 +157,8 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
             }.tag(Identifiers.TARGET_NAME_ROW));
         }
         String modName = ModIdentification.nameFromStack(itemStack != null ? itemStack : new ItemStack(Blocks.air));
-        if (PluginsConfig.core.defaultBlock.showModName) {
-            Theme theme = General.currentTheme.get();
-            if (modName != null) {
-                row_vertical.child(
-                        new TextComponent(ITALIC + modName)
-                                .style(new TextStyle().color(theme.textColor(MessageType.MOD_NAME)))
-                                .tag(Identifiers.MOD_NAME));
-            } else {
-                // reserve for replacement
-                row_vertical.child(
-                        new TextComponent("").style(new TextStyle().color(theme.textColor(MessageType.MOD_NAME)))
-                                .tag(Identifiers.MOD_NAME));
-            }
+        if (PluginsConfig.core.defaultBlock.showModName && General.showModName) {
+            row_vertical.child(ThemeHelper.INSTANCE.modName(modName).tag(Identifiers.MOD_NAME));
         }
     }
 
