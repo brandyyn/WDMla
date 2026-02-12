@@ -19,6 +19,8 @@ public class General {
 
     public static TextColor textColor = new TextColor();
 
+    public static ModName modName = new ModName();
+
     public static ProgressColor progressColor = new ProgressColor();
 
     public static BreakProgress breakProgress = new BreakProgress();
@@ -47,16 +49,6 @@ public class General {
     @Config.DefaultBoolean(true)
     @Config.Comment("Allow renamed object taking place on tooltip title")
     public static boolean customNameOverride;
-
-    @Config.LangKey("option.wdmla.general.show.modname")
-    @Config.DefaultBoolean(true)
-    @Config.Comment("Show mod names in the HUD")
-    public static boolean showModName;
-
-    @Config.LangKey("option.wdmla.general.modname.italic")
-    @Config.DefaultBoolean(true)
-    @Config.Comment("Render mod names in italics in the HUD")
-    public static boolean modNameItalic;
 
     @Config.LangKey("option.wdmla.general.maxnamelengthpixel")
     @Config.DefaultInt(150)
@@ -108,14 +100,45 @@ public class General {
         @Config.DefaultInt(ColorPalette.FAILURE)
         public int failure;
 
-        @Config.LangKey("option.wdmla.general.textcolor.modname")
-        @Config.DefaultInt(ColorPalette.MOD_NAME)
-        public int modName;
+    }
 
-        @Config.LangKey("option.wdmla.general.textcolor.modname.override")
+    @Config.Comment("Mod name display settings.")
+    @Config.LangKey("option.wdmla.modname.category")
+    public static class ModName {
+
+        @Config.LangKey("option.wdmla.modname.hud.show")
+        @Config.DefaultBoolean(true)
+        @Config.Comment("Show mod names in the HUD")
+        public boolean hudShow;
+
+        @Config.LangKey("option.wdmla.modname.hud.italic")
+        @Config.DefaultBoolean(true)
+        @Config.Comment("Render mod names in italics in the HUD")
+        public boolean hudItalic;
+
+        @Config.LangKey("option.wdmla.modname.hud.color")
+        @Config.DefaultInt(ColorPalette.MOD_NAME)
+        public int hudColor;
+
+        @Config.LangKey("option.wdmla.modname.hud.color.override")
         @Config.DefaultString("")
-        @Config.Comment("Override mod name color. Supports hex (#RRGGBB, 0xRRGGBB) or names like RED, BLUE, GRAY")
-        public String modNameOverride;
+        @Config.Comment("Override HUD mod name color. Supports hex (#RRGGBB, 0xRRGGBB) or names like RED, BLUE, GRAY")
+        public String hudColorOverride;
+
+        @Config.LangKey("option.wdmla.modname.inventory.show")
+        @Config.DefaultBoolean(true)
+        @Config.Comment("Show mod names in inventory tooltips")
+        public boolean inventoryShow;
+
+        @Config.LangKey("option.wdmla.modname.inventory.italic")
+        @Config.DefaultBoolean(true)
+        @Config.Comment("Render mod names in italics in inventory tooltips")
+        public boolean inventoryItalic;
+
+        @Config.LangKey("option.wdmla.modname.inventory.color.override")
+        @Config.DefaultString("")
+        @Config.Comment("Override inventory mod name color. Supports hex (#RRGGBB, 0xRRGGBB) or names like RED, BLUE, GRAY")
+        public String inventoryColorOverride;
     }
 
     @Config.Comment("The colors used in progress bar. \n"

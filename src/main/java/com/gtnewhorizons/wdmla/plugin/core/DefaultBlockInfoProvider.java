@@ -157,7 +157,7 @@ private static net.minecraft.item.ItemStack getThaumcraftNitorStack() {
             }.tag(Identifiers.TARGET_NAME_ROW));
         }
         String modName = ModIdentification.nameFromStack(itemStack != null ? itemStack : new ItemStack(Blocks.air));
-        if (PluginsConfig.core.defaultBlock.showModName && General.showModName) {
+        if (PluginsConfig.core.defaultBlock.showModName && General.modName.hudShow) {
             row_vertical.child(ThemeHelper.INSTANCE.modName(modName).tag(Identifiers.MOD_NAME));
         }
     }

@@ -68,7 +68,7 @@ public class WDMlaTickHandler {
             mainHUD = new RootComponent();
             mainHUD.child(new TextComponent(StatCollector.translateToLocal("hud.msg.wdmla.cfg.dummy.1")))
                     .child(new TextComponent(StatCollector.translateToLocal("hud.msg.wdmla.cfg.dummy.2")));
-            if (General.showModName) {
+            if (General.modName.hudShow) {
                 mainHUD.child(
                         ThemeHelper.INSTANCE.modName(StatCollector.translateToLocal("hud.msg.wdmla.cfg.dummy.3")));
             }

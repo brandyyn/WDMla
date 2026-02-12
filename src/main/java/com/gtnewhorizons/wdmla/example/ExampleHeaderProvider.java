@@ -30,7 +30,7 @@ public enum ExampleHeaderProvider implements IBlockComponentProvider {
     public void appendTooltip(ITooltip tooltip, BlockAccessor accessor) {
         ThemeHelper.INSTANCE.overrideTooltipIcon(tooltip, new ItemStack(Blocks.lit_furnace), true);
         ThemeHelper.INSTANCE.overrideTooltipTitle(tooltip, "Furnace");
-        if (General.showModName) {
+        if (General.modName.hudShow) {
             tooltip.replaceChildWithTag(
                     Identifiers.MOD_NAME,
                     ThemeHelper.INSTANCE.modName("WDMla").tag(Identifiers.MOD_NAME));

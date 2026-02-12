@@ -62,7 +62,7 @@ public enum DefaultEntityInfoProvider implements IEntityComponentProvider {
             }
             row_vertical.child(ThemeHelper.INSTANCE.title(name).tag(Identifiers.ENTITY_NAME));
         }
-        if (PluginsConfig.core.defaultEntity.showModName && General.showModName) {
+        if (PluginsConfig.core.defaultEntity.showModName && General.modName.hudShow) {
             row_vertical.child(
                     ThemeHelper.INSTANCE.modName(ModIdentification.nameFromEntity(accessor.getEntity()))
                             .tag(Identifiers.MOD_NAME));
