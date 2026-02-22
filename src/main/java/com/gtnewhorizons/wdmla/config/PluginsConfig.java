@@ -92,6 +92,10 @@ public class PluginsConfig {
             @Config.LangKey("option.wdmla.core.show.hptext")
             @Config.DefaultBoolean(true)
             public boolean showHPText;
+
+            @Config.LangKey("option.wdmla.core.show.painting.itemicon")
+            @Config.DefaultBoolean(false)
+            public boolean paintingAsItemIcon;
         }
 
         public static enum fancyRendererMode {

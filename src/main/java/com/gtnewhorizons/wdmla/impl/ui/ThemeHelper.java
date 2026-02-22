@@ -7,6 +7,8 @@ import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
+import net.minecraft.entity.item.EntityPainting;
+import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.StatCollector;
 
@@ -95,15 +97,21 @@ public class ThemeHelper {
 
     public void overrideEntityTooltipIcon(ITooltip root, @Nullable Entity newEntity) {
         if (PluginsConfig.core.defaultEntity.showEntity) {
-            if (!PluginsConfig.core.defaultEntity.fancyRenderer && !(newEntity instanceof EntityLiving)) {
-                root.replaceChildWithTag(Identifiers.ENTITY, new HPanelComponent().tag(Identifiers.ENTITY));
-            } else {
-                root.replaceChildWithTag(
-                        Identifiers.ENTITY,
-                        new EntityComponent(newEntity).padding(new Padding(6, 0, 10, 0)).size(new Size(12, 12))
-                                .tag(Identifiers.ENTITY));
-            }
+            root.replaceChildWithTag(Identifiers.ENTITY, entityIcon(newEntity).tag(Identifiers.ENTITY));
         }
+    }
+
+    public IComponent entityIcon(@Nullable Entity entity) {
+        if (entity instanceof EntityPainting) {
+            if (PluginsConfig.core.defaultEntity.paintingAsItemIcon) {
+                return new ItemComponent(new ItemStack(Items.painting)).doDrawOverlay(false);
+            }
+            return new EntityComponent(entity).padding(new Padding()).size(new Size(24, 24));
+        }
+        if (entity == null || (!PluginsConfig.core.defaultEntity.fancyRenderer && !(entity instanceof EntityLiving))) {
+            return new HPanelComponent();
+        }
+        return new EntityComponent(entity).padding(new Padding(6, 0, 10, 0)).size(new Size(12, 12));
     }
 
     public void overrideTooltipModName(ITooltip root, ItemStack newItemStack) {

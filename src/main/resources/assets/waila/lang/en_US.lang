@@ -348,6 +348,7 @@ option.wdmla.core.renderer.rotation.speed=Fancy Renderer Rotation Speed
 option.wdmla.core.entity.icon.auto.scale=Icon Auto Scale
 option.wdmla.core.entity.icon.default.scale=Icon Default Scale
 option.wdmla.core.show.hptext=Show "HP:" text
+option.wdmla.core.show.painting.itemicon=Render Paintings as Item Icons
 
 # universal options
 option.wdmla.universal.normal.amount=Normal Amount
