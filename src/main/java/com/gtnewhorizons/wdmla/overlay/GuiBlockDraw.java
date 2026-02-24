@@ -94,8 +94,8 @@ if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock insta
 }
 
 
-// Waystones are two-block tall like doors; include both halves for centering (no lighting/AO changes).
-if (isWaystoneBlock(baseBlock)) {
+// Waystones and RiftFlux Blessing Pillars are two-block tall like doors; include both halves for centering (no lighting/AO changes).
+if (isWaystoneBlock(baseBlock) || isBlessingPillarBlock(baseBlock)) {
     Block above = mc.theWorld.getBlock(blockX, blockY + 1, blockZ);
     Block below = mc.theWorld.getBlock(blockX, blockY - 1, blockZ);
     if (above == baseBlock) {
@@ -274,8 +274,8 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
             TileEntity tile = Minecraft.getMinecraft().theWorld.getTileEntity(x, y, z);
             if (tile != null && tesr.hasSpecialRenderer(tile)) {
                 if (tile.shouldRenderInPass(finalPass)) {
-            // Waystones: HUD-only render should ignore lighting/AO influence from the world/hand.
-            if (isWaystoneBlock(mc.theWorld.getBlock(x, y, z))) {
+            // Waystones + RiftFlux Blessing Pillars: HUD-only render should ignore lighting/AO influence from the world/hand.
+            if (isWaystoneBlock(mc.theWorld.getBlock(x, y, z)) || isBlessingPillarBlock(mc.theWorld.getBlock(x, y, z))) {
                 // Save current lightmap + lighting state, force fullbright for just this TESR draw.
                 final float prevX = OpenGlHelper.lastBrightnessX;
                 final float prevY = OpenGlHelper.lastBrightnessY;
@@ -348,7 +348,7 @@ if (baseBlock instanceof net.minecraft.block.BlockDoublePlant || baseBlock insta
     toRender.add(new BlockPos(ox, blocksToRender.y, oz));
 }
 
-if (isWaystoneBlock(baseBlock)) {
+if (isWaystoneBlock(baseBlock) || isBlessingPillarBlock(baseBlock)) {
     Block above = mc.theWorld.getBlock(blocksToRender.x, blocksToRender.y + 1, blocksToRender.z);
     Block below = mc.theWorld.getBlock(blocksToRender.x, blocksToRender.y - 1, blocksToRender.z);
     if (above == baseBlock) toRender.add(new BlockPos(blocksToRender.x, blocksToRender.y + 1, blocksToRender.z));
@@ -474,6 +474,14 @@ private static boolean isWaystoneBlock(net.minecraft.block.Block b) {
     return s.contains("waystone");
 }
 
+private static boolean isBlessingPillarBlock(net.minecraft.block.Block b) {
+    if (b == null) return false;
+    Object regNameObj = net.minecraft.block.Block.blockRegistry.getNameForObject(b);
+    String reg = regNameObj != null ? regNameObj.toString() : "";
+    if ("riftflux:blessing_pillar".equals(reg)) return true;
+    String unloc = b.getUnlocalizedName();
+    return unloc != null && unloc.contains("riftflux.blessing_pillar");
+}
 
 
 private static final class HudIsolatedFullBrightBlockAccess implements net.minecraft.world.IBlockAccess {
@@ -509,7 +517,7 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
 
         if ((meta & 8) == 0) includePos(cx + dx, cy, cz + dz);
         else includePos(cx - dx, cy, cz - dz);
-    } else if (isWaystoneBlock(b)) {
+    } else if (isWaystoneBlock(b) || isBlessingPillarBlock(b)) {
         // Door-style: include only the other half if it is the same block.
         net.minecraft.block.Block above = delegate.getBlock(cx, cy + 1, cz);
         net.minecraft.block.Block below = delegate.getBlock(cx, cy - 1, cz);
