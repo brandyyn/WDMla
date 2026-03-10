@@ -264,18 +264,23 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         // render TESR
         TileEntityRendererDispatcher tesr = TileEntityRendererDispatcher.instance;
         for (int pass = 0; pass < 2; pass++) {
-            ForgeHooksClient.setRenderPass(pass);
             int finalPass = pass;
 
             int x = renderedBlock.x;
             int y = renderedBlock.y;
             int z = renderedBlock.z;
             setDefaultPassRenderState(finalPass);
+            Block blockAtPos = mc.theWorld.getBlock(x, y, z);
             TileEntity tile = Minecraft.getMinecraft().theWorld.getTileEntity(x, y, z);
             if (tile != null && tesr.hasSpecialRenderer(tile)) {
+                // ProjectRed lamps have a TESR that mutates global halo-light state rather than drawing geometry.
+                // Running it from HUD preview can cause visible in-world flicker, while
+                // the lamp body itself is already rendered by the standard block renderer.
+                if (shouldSkipTesrForFancyPreview(blockAtPos, tile)) continue;
+                ForgeHooksClient.setRenderPass(pass);
                 if (tile.shouldRenderInPass(finalPass)) {
             // Waystones + RiftFlux Blessing Pillars: HUD-only render should ignore lighting/AO influence from the world/hand.
-            if (isWaystoneBlock(mc.theWorld.getBlock(x, y, z)) || isBlessingPillarBlock(mc.theWorld.getBlock(x, y, z))) {
+            if (isWaystoneBlock(blockAtPos) || isBlessingPillarBlock(blockAtPos)) {
                 // Save current lightmap + lighting state, force fullbright for just this TESR draw.
                 final float prevX = OpenGlHelper.lastBrightnessX;
                 final float prevY = OpenGlHelper.lastBrightnessY;
@@ -296,9 +301,9 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
                 tesr.renderTileEntityAt(tile, x, y, z, 0);
             }
                 }
+                ForgeHooksClient.setRenderPass(-1);
             }
         }
-        ForgeHooksClient.setRenderPass(-1);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
         glPopMatrix();
@@ -307,20 +312,25 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
         return renderedAny;
     }
 
-        public boolean renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
+    public boolean renderBlocks(Tessellator tessellator, BlockPos blocksToRender) {
         if (blocksToRender == null) return false;
 
         boolean renderedAny = false;
 
         Minecraft mc = Minecraft.getMinecraft();
+        final int hudBrightness = 0x00A000A0;
 
         tessellator.startDrawingQuads();
         try {
-            // Full-bright lightmap for HUD rendering.
-            tessellator.setBrightness(0x00F000F0);
+            tessellator.setBrightness(hudBrightness);
 
             // Use a full-bright IBlockAccess wrapper, but do NOT mutate global GameSettings (prevents dynamic light flicker).
-            bufferBuilder.blockAccess = new HudIsolatedFullBrightBlockAccess(mc.theWorld, blocksToRender.x, blocksToRender.y, blocksToRender.z);
+            bufferBuilder.blockAccess = new HudIsolatedFullBrightBlockAccess(
+                    mc.theWorld,
+                    blocksToRender.x,
+                    blocksToRender.y,
+                    blocksToRender.z,
+                    hudBrightness);
             bufferBuilder.enableAO = false;
             bufferBuilder.renderAllFaces = true;
 
@@ -483,13 +493,39 @@ private static boolean isBlessingPillarBlock(net.minecraft.block.Block b) {
     return unloc != null && unloc.contains("riftflux.blessing_pillar");
 }
 
+private static boolean shouldSkipTesrForFancyPreview(Block block, TileEntity tile) {
+    if (isProjectRedLampBlock(block)) return true;
+
+    if (tile != null) {
+        String tileClass = tile.getClass().getName();
+        if ("mrtjp.projectred.illumination.TileLamp".equals(tileClass)) return true;
+    }
+    return false;
+}
+
+private static boolean isProjectRedLampBlock(Block b) {
+    if (b == null) return false;
+    Object regNameObj = net.minecraft.block.Block.blockRegistry.getNameForObject(b);
+    String reg = regNameObj != null ? regNameObj.toString() : "";
+    if (reg.toLowerCase(java.util.Locale.ROOT).contains("projectred.illumination.lamp")) return true;
+
+    String unloc = b.getUnlocalizedName();
+    String cls = b.getClass().getName();
+    String s = (unloc + " " + cls).toLowerCase(java.util.Locale.ROOT);
+    return s.contains("projectred.illumination.lamp")
+            || s.contains("mrtjp.projectred.illumination.blocklamp");
+}
+
 
 private static final class HudIsolatedFullBrightBlockAccess implements net.minecraft.world.IBlockAccess {
     private final net.minecraft.world.IBlockAccess delegate;
     private final java.util.HashSet<Long> include;
+    private final int hudBrightness;
 
-    private HudIsolatedFullBrightBlockAccess(net.minecraft.world.IBlockAccess delegate, int cx, int cy, int cz) {
+    private HudIsolatedFullBrightBlockAccess(net.minecraft.world.IBlockAccess delegate, int cx, int cy, int cz,
+            int hudBrightness) {
     this.delegate = delegate;
+    this.hudBrightness = hudBrightness;
     this.include = new java.util.HashSet<Long>(6);
 
 
@@ -551,8 +587,7 @@ private static final class HudIsolatedFullBrightBlockAccess implements net.minec
 
     @Override
     public int getLightBrightnessForSkyBlocks(int x, int y, int z, int p_72802_4_) {
-        // Full-bright lightmap coords (same value vanilla uses for maximum brightness)
-        return 0x00F000F0;
+        return hudBrightness;
     }
 
     @Override
