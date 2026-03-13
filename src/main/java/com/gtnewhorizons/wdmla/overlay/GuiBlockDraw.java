@@ -6,6 +6,7 @@ import mcp.mobius.waila.overlay.OverlayConfig;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.renderer.RenderBlocks;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
@@ -36,7 +37,7 @@ public class GuiBlockDraw {
     private final Vector3f lookAt = new Vector3f(0, 0, 0);
     private final Vector3f worldUp = new Vector3f(0, 1, 0);
     private Vector4i rect = new Vector4i();
-    private final RenderBlocks bufferBuilder = new RenderBlocks();
+    private final HudRenderBlocks bufferBuilder = new HudRenderBlocks();
 
     private float prevLightmapX;
     private float prevLightmapY;
@@ -55,11 +56,13 @@ Block baseBlock = mc.theWorld.getBlock(blockX, blockY, blockZ);
 int baseMeta = mc.theWorld.getBlockMetadata(blockX, blockY, blockZ);
 
 // Some multi-block / 2-tall blocks (e.g. Waystones) have their TileEntity or TESR only on the lower half.
-// If we are looking at the upper half, shift rendering to the lower half so the fancy preview works.
+// If we are looking at the upper half of the same block, shift rendering to the lower half so the
+// fancy preview works without incorrectly hijacking unrelated blocks placed above TESRs.
 TileEntity teHere = mc.theWorld.getTileEntity(blockX, blockY, blockZ);
 if (teHere == null) {
+    Block blockBelow = mc.theWorld.getBlock(blockX, blockY - 1, blockZ);
     TileEntity teBelow = mc.theWorld.getTileEntity(blockX, blockY - 1, blockZ);
-    if (teBelow != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(teBelow)) {
+    if (blockBelow == baseBlock && teBelow != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(teBelow)) {
         blockY -= 1;
         baseBlock = mc.theWorld.getBlock(blockX, blockY, blockZ);
         baseMeta = mc.theWorld.getBlockMetadata(blockX, blockY, blockZ);
@@ -331,7 +334,6 @@ Vector3f center = new Vector3f((minX + maxX) * 0.5f + 0.5f, (minY + maxY) * 0.5f
                     blocksToRender.y,
                     blocksToRender.z,
                     hudBrightness);
-            bufferBuilder.enableAO = false;
             bufferBuilder.renderAllFaces = true;
 
             // Determine which world positions to render (some blocks span multiple blocks).
@@ -381,6 +383,7 @@ for (int pass = 0; pass < 2; pass++) {
         // Ensure the block's bounds match its in-world state (fixes slabs/stairs/etc rendering as full cubes).
         block.setBlockBoundsBasedOnState(bufferBuilder.blockAccess, x, y, z);
         bufferBuilder.setRenderBoundsFromBlock(block);
+        bufferBuilder.enableAO = pass == 0;
 
 // For grass blocks (vanilla + most modded), never show snowy sides in the HUD preview.
 // BlockGrass picks snowy-side textures by checking the block above in getIcon(IBlockAccess,...),
@@ -390,6 +393,9 @@ for (int pass = 0; pass < 2; pass++) {
 //  - tinted side overlay (getIconSideOverlay)
 
 if (block instanceof net.minecraft.block.BlockGrass) {
+    // This branch uses manual per-face coloring; RenderBlocks AO mode would ignore those colors and
+    // reuse cached AO vertex data, which turns the preview grey/dark.
+    bufferBuilder.enableAO = false;
     int meta = mc.theWorld.getBlockMetadata(x, y, z);
 
     IIcon iconBottom = block.getIcon(0, meta);
@@ -440,29 +446,27 @@ if (block instanceof net.minecraft.block.BlockGrass) {
     continue;
 }
 
-        // For standard cube rendering, call the non-AO path directly (avoids RenderBlocks consulting global AO settings).
         int rt = block.getRenderType();
-if (rt == 0) {
-    // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
-    // render correctly via the standard block renderer. The main case we want to avoid here is
-    // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
-    int meta = mc.theWorld.getBlockMetadata(x, y, z);
-    TileEntity te = mc.theWorld.getTileEntity(x, y, z);
-    boolean hasTesr = te != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(te);
+        if (rt == 0) {
+            // Many vanilla-style blocks (glass, leaves, etc.) return renderAsNormalBlock()==false but still
+            // render correctly via the standard block renderer. The main case we want to avoid here is
+            // TESR-based blocks that also report renderType==0 (e.g. DeepResonance crystals).
+            int meta = mc.theWorld.getBlockMetadata(x, y, z);
+            TileEntity te = mc.theWorld.getTileEntity(x, y, z);
+            boolean hasTesr = te != null && TileEntityRendererDispatcher.instance.hasSpecialRenderer(te);
 
-    if (!block.renderAsNormalBlock() && hasTesr) {
-        // Skip cube rendering; the TESR will render the proper model.
-        continue;
-    }
+            if (!block.renderAsNormalBlock() && hasTesr) {
+                // Skip cube rendering; the TESR will render the proper model.
+                continue;
+            }
 
-    if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
-        renderedAny |= bufferBuilder.renderStandardBlock(block, x, y, z);
-    } else {
-        // Skip cube rendering; the TESR (if any) will render the proper model.
-        continue;
-    }
-} else {
-
+            if (block.renderAsNormalBlock() || !block.hasTileEntity(meta)) {
+                renderedAny |= bufferBuilder.renderBlockByRenderType(block, x, y, z);
+            } else {
+                // Skip cube rendering; the TESR (if any) will render the proper model.
+                continue;
+            }
+        } else {
             renderedAny |= bufferBuilder.renderBlockByRenderType(block, x, y, z);
         }
     }
@@ -472,6 +476,29 @@ if (rt == 0) {
             tessellator.setTranslation(0, 0, 0);
         }
         return renderedAny;
+    }
+
+    private static class HudRenderBlocks extends RenderBlocks {
+
+        @Override
+        public boolean renderStandardBlock(Block block, int x, int y, int z) {
+            int color = block.colorMultiplier(this.blockAccess, x, y, z);
+            float red = (float) (color >> 16 & 255) / 255.0F;
+            float green = (float) (color >> 8 & 255) / 255.0F;
+            float blue = (float) (color & 255) / 255.0F;
+
+            if (EntityRenderer.anaglyphEnable) {
+                float adjRed = (red * 30.0F + green * 59.0F + blue * 11.0F) / 100.0F;
+                float adjGreen = (red * 30.0F + green * 70.0F) / 100.0F;
+                float adjBlue = (red * 30.0F + blue * 70.0F) / 100.0F;
+                red = adjRed;
+                green = adjGreen;
+                blue = adjBlue;
+            }
+
+            // Always use the isolated non-world fake shading path for the fancy HUD preview.
+            return this.renderStandardBlockWithColorMultiplier(block, x, y, z, red, green, blue);
+        }
     }
 
 private static boolean isWaystoneBlock(net.minecraft.block.Block b) {
